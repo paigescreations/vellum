@@ -71,6 +71,7 @@
     position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     padding:24px;background:var(--bg);z-index:30;
   }
+  .gate[hidden]{display:none;}
   .gate-card{max-width:360px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px;}
   .gate-card h1{font-size:2rem;}
   .gate-card p{color:var(--ink-soft);font-size:0.92rem;line-height:1.55;margin:0;}
@@ -335,27 +336,38 @@
   var currentStream = null;
   var facing = 'environment';
 
-  function startCamera(){
-    els.camErr.hidden = true;
-    var constraints = { audio: false, video: { facingMode: { ideal: facing } } };
+  // Ask getUserMedia() for a stream, but never wait forever -- some phones
+  // can leave this hanging indefinitely (camera hardware turns on, but the
+  // promise never settles), most often when negotiating a specific facing
+  // mode/resolution, or when another app or tab already has the camera.
+  function requestStream(constraints, timeoutMs){
     var timedOut = false;
-
-    // Some mobile browsers can leave getUserMedia() hanging indefinitely --
-    // most often because another app or tab already has the camera open.
-    // A watchdog timer means the user always gets a clear message instead
-    // of a permanent "Starting..." with no way forward.
     var getStream = navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
       if (timedOut) {
+        // Answered too late -- we've already moved on. Release it so the
+        // camera doesn't stay locked to a stream nobody is using.
         stream.getTracks().forEach(function(t){ t.stop(); });
         return Promise.reject(new Error('TIMEOUT_LATE'));
       }
       return stream;
     });
     var watchdog = new Promise(function(_, reject){
-      setTimeout(function(){ timedOut = true; reject(new Error('TIMEOUT')); }, 12000);
+      setTimeout(function(){ timedOut = true; reject(new Error('TIMEOUT')); }, timeoutMs);
     });
+    return Promise.race([getStream, watchdog]);
+  }
 
-    return Promise.race([getStream, watchdog]).then(function(stream){
+  function startCamera(){
+    els.camErr.hidden = true;
+    var specific = { audio: false, video: { facingMode: { ideal: facing } } };
+
+    return requestStream(specific, 8000).catch(function(err){
+      if (err && err.message !== 'TIMEOUT') throw err;
+      // Asking for a specific camera hung -- on some Android camera stacks,
+      // a plain "just give me a camera" request succeeds where a facing-mode
+      // request stalls. Try once more, simply.
+      return requestStream({ audio: false, video: true }, 8000);
+    }).then(function(stream){
       if (currentStream) currentStream.getTracks().forEach(function(t){ t.stop(); });
       currentStream = stream;
       els.video.srcObject = stream;
@@ -432,7 +444,10 @@
   }
 
   els.stage.addEventListener('pointerdown', function(e){
-    if (state.locked) return;
+    // While the permission gate (or any sheet) is showing, this is not the
+    // drawing surface yet -- don't capture the pointer, or clicks on the
+    // gate's own buttons (like "Enable camera") never reach them.
+    if (state.locked || !els.gate.hidden) return;
     els.stage.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     beginGesture();
