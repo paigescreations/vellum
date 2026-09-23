@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vellum</title>
+<style>
+  :root{
+    --bg:#121214;
+    --panel:#1c1c1f;
+    --panel-2:#25252a;
+    --line:#38383d;
+    --ink:#f2f0ec;
+    --ink-soft:#9a9893;
+    --accent:#e2a33d;
+    --accent-ink:#20160a;
+    --locked:#4caf7d;
+    --danger:#e0725f;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);overscroll-behavior:none;}
+  body{
+    display:flex;flex-direction:column;
+    font-family:'Work Sans',-apple-system,'Segoe UI',sans-serif;
+    color:var(--ink);
+    -webkit-tap-highlight-color:transparent;
+    user-select:none;
+  }
+  h1,h2,h3{font-family:'Fraunces',Georgia,serif;margin:0;}
+  .mono{font-family:'Space Mono',ui-monospace,SFMono-Regular,monospace;font-variant-numeric:tabular-nums;}
+
+  header{
+    flex:none;display:flex;align-items:center;justify-content:space-between;
+    padding:12px 16px;padding-top:calc(12px + env(safe-area-inset-top,0px));
+    background:var(--panel);border-bottom:1px solid var(--line);
+    position:relative;z-index:20;
+  }
+  .wordmark{font-family:'Fraunces',Georgia,serif;font-style:italic;font-weight:600;font-size:1.15rem;letter-spacing:0.01em;}
+  .icon-btn{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:38px;height:38px;border-radius:50%;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);
+    cursor:pointer;flex:none;
+  }
+  .icon-btn svg{width:18px;height:18px;}
+
+  main.stage{
+    flex:1;position:relative;overflow:hidden;background:#000;
+    touch-action:none;
+  }
+  main.stage video{
+    position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  }
+  .overlay-img{
+    position:absolute;left:50%;top:50%;width:60vw;max-width:640px;height:auto;
+    transform-origin:center center;pointer-events:none;
+    filter:drop-shadow(0 0 1px rgba(0,0,0,0.4));
+  }
+  .grid-layer{
+    position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .15s;
+  }
+  .grid-layer.on{opacity:0.5;}
+  .grid-layer svg{width:100%;height:100%;}
+  .sample-pill{
+    position:absolute;top:12px;left:50%;transform:translateX(-50%);
+    background:rgba(28,28,31,0.85);border:1px solid var(--line);
+    color:var(--ink-soft);font-size:0.72rem;padding:5px 12px;border-radius:999px;
+    pointer-events:none;z-index:5;
+  }
+
+  .gate{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    padding:24px;background:var(--bg);z-index:30;
+  }
+  .gate-card{max-width:360px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px;}
+  .gate-card h1{font-size:2rem;}
+  .gate-card p{color:var(--ink-soft);font-size:0.92rem;line-height:1.55;margin:0;}
+  .btn{
+    border:none;border-radius:10px;padding:13px 22px;font-size:0.95rem;font-weight:700;
+    font-family:'Work Sans',sans-serif;cursor:pointer;
+  }
+  .btn.primary{background:var(--accent);color:var(--accent-ink);}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink);}
+  .err{color:var(--danger);font-size:0.85rem;}
+
+  footer.dock{
+    flex:none;display:flex;align-items:center;justify-content:space-around;
+    padding:14px 20px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));
+    background:var(--panel);border-top:1px solid var(--line);
+    position:relative;z-index:20;
+  }
+  .dock-btn{
+    display:flex;flex-direction:column;align-items:center;gap:5px;
+    background:none;border:none;color:var(--ink-soft);font-size:0.68rem;
+    font-family:'Work Sans',sans-serif;font-weight:600;cursor:pointer;
+  }
+  .dock-btn .ring{
+    width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    background:var(--panel-2);border:1px solid var(--line);
+  }
+  .dock-btn.lock .ring{width:60px;height:60px;background:var(--accent);border-color:var(--accent);}
+  .dock-btn.lock .ring svg{color:var(--accent-ink);}
+  .dock-btn.lock.locked .ring{background:var(--locked);border-color:var(--locked);}
+  .dock-btn svg{width:20px;height:20px;color:inherit;}
+  .dock-btn.lock svg{width:24px;height:24px;}
+
+  .sheet-wrap{
+    position:absolute;inset:0;background:rgba(0,0,0,0.5);
+    display:flex;align-items:flex-end;justify-content:center;z-index:40;
+  }
+  .sheet-wrap[hidden]{display:none;}
+  .sheet{
+    width:100%;max-width:480px;background:var(--panel);
+    border-radius:18px 18px 0 0;padding:18px 20px;
+    padding-bottom:calc(20px + env(safe-area-inset-bottom,0px));
+    display:flex;flex-direction:column;gap:16px;
+    border-top:1px solid var(--line);
+  }
+  .sheet-head{display:flex;align-items:center;justify-content:space-between;}
+  .sheet-head h2{font-size:1.05rem;font-style:italic;}
+  .row{display:flex;flex-direction:column;gap:6px;}
+  .row-head{display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.04em;}
+  .row-head b.mono{color:var(--ink);font-size:0.82rem;}
+  input[type=range]{width:100%;accent-color:var(--accent);height:22px;}
+  .switch-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line);}
+  .switch-row:first-of-type{border-top:none;}
+  .switch{position:relative;width:44px;height:26px;flex:none;}
+  .switch input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;}
+  .switch .track{position:absolute;inset:0;background:var(--panel-2);border:1px solid var(--line);border-radius:999px;transition:background .15s;}
+  .switch .knob{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:var(--ink-soft);transition:transform .15s,background .15s;}
+  .switch input:checked + .track{background:var(--accent);border-color:var(--accent);}
+  .switch input:checked + .track + .knob{transform:translateX(18px);background:var(--accent-ink);}
+  .sheet-actions{display:flex;gap:10px;}
+  .sheet-actions .btn{flex:1;}
+
+  .help-body{display:flex;flex-direction:column;gap:12px;color:var(--ink-soft);font-size:0.88rem;line-height:1.6;}
+  .help-body .step{display:flex;gap:10px;align-items:flex-start;}
+  .help-body .step .n{font-family:'Space Mono',monospace;color:var(--accent);font-weight:700;flex:none;}
+
+  @media (max-width:380px){
+    .gate-card h1{font-size:1.7rem;}
+  }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,600;1,600&family=Work+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap">
+</head>
+<body>
+
+<header>
+  <span class="wordmark">Vellum</span>
+  <button class="icon-btn" id="helpBtn" aria-label="How it works">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.4 2.3c-.9.4-1.4 1-1.4 2"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg>
+  </button>
+</header>
+
+<main class="stage" id="stage">
+  <video id="video" autoplay playsinline muted></video>
+  <div class="grid-layer" id="gridLayer">
+    <svg viewBox="0 0 300 300" preserveAspectRatio="none">
+      <g stroke="#f2f0ec" stroke-width="0.6">
+        <line x1="100" y1="0" x2="100" y2="300"/>
+        <line x1="200" y1="0" x2="200" y2="300"/>
+        <line x1="0" y1="100" x2="300" y2="100"/>
+        <line x1="0" y1="200" x2="300" y2="200"/>
+      </g>
+    </svg>
+  </div>
+  <img class="overlay-img" id="overlayImg" alt="Reference overlay" />
+  <div class="sample-pill" id="samplePill">Sample sketch — load your own image below</div>
+
+  <div class="gate" id="gate">
+    <div class="gate-card">
+      <h1>Vellum</h1>
+      <p>See a reference image projected over your camera view — live — so you can trace it straight onto a wall, canvas, or any surface at full scale.</p>
+      <p>Vellum needs your camera to work.</p>
+      <button class="btn primary" id="enableCamBtn">Enable camera</button>
+      <div class="err" id="camErr" hidden></div>
+    </div>
+  </div>
+</main>
+
+<footer class="dock">
+  <button class="dock-btn" id="loadBtn">
+    <span class="ring">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="15" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/><circle cx="8" cy="9" r="1.4" fill="currentColor" stroke="none"/></svg>
+    </span>
+    Image
+  </button>
+  <button class="dock-btn lock" id="lockBtn">
+    <span class="ring">
+      <svg id="lockIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+    </span>
+    <span id="lockLabel">Lock</span>
+  </button>
+  <button class="dock-btn" id="adjustBtn">
+    <span class="ring">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2" fill="var(--panel)"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="16" cy="12" r="2" fill="var(--panel)"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="11" cy="18" r="2" fill="var(--panel)"/></svg>
+    </span>
+    Adjust
+  </button>
+</footer>
+
+<input type="file" accept="image/*" id="fileInput" hidden />
+
+<div class="sheet-wrap" id="adjustWrap" hidden>
+  <div class="sheet">
+    <div class="sheet-head"><h2>Adjust</h2><button class="icon-btn" id="closeAdjust" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button></div>
+
+    <div class="row">
+      <div class="row-head"><span>Opacity</span><b class="mono" id="opacityVal">50%</b></div>
+      <input type="range" id="opacitySlider" min="10" max="90" value="50" />
+    </div>
+    <div class="row">
+      <div class="row-head"><span>Rotation</span><b class="mono" id="rotationVal">0°</b></div>
+      <input type="range" id="rotationSlider" min="-180" max="180" value="0" />
+    </div>
+
+    <div>
+      <div class="switch-row">
+        <span>Mirror image</span>
+        <label class="switch"><input type="checkbox" id="mirrorToggle" /><span class="track"></span><span class="knob"></span></label>
+      </div>
+      <div class="switch-row">
+        <span>Grid overlay</span>
+        <label class="switch"><input type="checkbox" id="gridToggle" /><span class="track"></span><span class="knob"></span></label>
+      </div>
+      <div class="switch-row">
+        <span>Front camera</span>
+        <label class="switch"><input type="checkbox" id="cameraToggle" /><span class="track"></span><span class="knob"></span></label>
+      </div>
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn ghost" id="resetBtn">Reset position</button>
+      <button class="btn ghost" id="fullscreenBtn">Fullscreen</button>
+    </div>
+  </div>
+</div>
+
+<div class="sheet-wrap" id="helpWrap" hidden>
+  <div class="sheet">
+    <div class="sheet-head"><h2>How it works</h2><button class="icon-btn" id="closeHelp" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button></div>
+    <div class="help-body">
+      <div class="step"><span class="n mono">1</span><span>Tap <b>Image</b> to load your reference photo or sketch from your camera roll.</span></div>
+      <div class="step"><span class="n mono">2</span><span>Drag with one finger to move it, or pinch with two fingers to resize and rotate it against the wall.</span></div>
+      <div class="step"><span class="n mono">3</span><span>Once it's lined up, tap <b>Lock</b> so it can't shift while you trace. Tap it again to unlock and reposition.</span></div>
+      <div class="step"><span class="n mono">4</span><span><b>Adjust</b> has fine opacity and rotation sliders, a mirror flip, a grid, and a camera switch.</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var els = {
+    gate: document.getElementById('gate'),
+    enableCamBtn: document.getElementById('enableCamBtn'),
+    camErr: document.getElementById('camErr'),
+    video: document.getElementById('video'),
+    stage: document.getElementById('stage'),
+    overlayImg: document.getElementById('overlayImg'),
+    samplePill: document.getElementById('samplePill'),
+    gridLayer: document.getElementById('gridLayer'),
+    fileInput: document.getElementById('fileInput'),
+    loadBtn: document.getElementById('loadBtn'),
+    lockBtn: document.getElementById('lockBtn'),
+    lockLabel: document.getElementById('lockLabel'),
+    adjustBtn: document.getElementById('adjustBtn'),
+    adjustWrap: document.getElementById('adjustWrap'),
+    closeAdjust: document.getElementById('closeAdjust'),
+    helpBtn: document.getElementById('helpBtn'),
+    helpWrap: document.getElementById('helpWrap'),
+    closeHelp: document.getElementById('closeHelp'),
+    opacitySlider: document.getElementById('opacitySlider'),
+    opacityVal: document.getElementById('opacityVal'),
+    rotationSlider: document.getElementById('rotationSlider'),
+    rotationVal: document.getElementById('rotationVal'),
+    mirrorToggle: document.getElementById('mirrorToggle'),
+    gridToggle: document.getElementById('gridToggle'),
+    cameraToggle: document.getElementById('cameraToggle'),
+    resetBtn: document.getElementById('resetBtn'),
+    fullscreenBtn: document.getElementById('fullscreenBtn'),
+  };
+
+  function loadPrefs(){
+    try {
+      var raw = window.localStorage.getItem('vellum-prefs');
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  }
+  function savePrefs(p){
+    try { window.localStorage.setItem('vellum-prefs', JSON.stringify(p)); } catch (e) {}
+  }
+  var prefs = loadPrefs();
+
+  var state = {
+    x: 0, y: 0, scale: 1, rotation: 0,
+    opacity: typeof prefs.opacity === 'number' ? prefs.opacity : 0.5,
+    mirrored: !!prefs.mirrored,
+    locked: false,
+  };
+
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
+  function applyTransform(){
+    var m = state.mirrored ? -1 : 1;
+    els.overlayImg.style.transform =
+      'translate(-50%,-50%) translate(' + state.x + 'px,' + state.y + 'px) ' +
+      'rotate(' + state.rotation + 'deg) scale(' + (state.scale * m) + ',' + state.scale + ')';
+    els.overlayImg.style.opacity = String(state.opacity);
+  }
+
+  var SAMPLE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 320">' +
+    '<g fill="none" stroke="#e2a33d" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M120 305 C118 245 122 180 120 40"/>' +
+    '<path d="M120 258 C90 240 70 210 60 172"/>' +
+    '<path d="M60 172 C50 152 55 132 72 122"/>' +
+    '<path d="M120 214 C150 196 170 172 178 138"/>' +
+    '<path d="M178 138 C187 120 180 102 163 95"/>' +
+    '<path d="M120 158 C95 144 82 118 85 90"/>' +
+    '<path d="M120 118 C144 106 158 84 155 58"/>' +
+    '<path d="M120 58 C112 38 116 18 133 7"/>' +
+    '</g></svg>';
+  var sampleLoaded = true;
+  els.overlayImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(SAMPLE_SVG);
+
+  els.opacitySlider.value = Math.round(state.opacity * 100);
+  els.opacityVal.textContent = els.opacitySlider.value + '%';
+  els.mirrorToggle.checked = state.mirrored;
+  applyTransform();
+
+  var currentStream = null;
+  var facing = 'environment';
+
+  function startCamera(){
+    els.camErr.hidden = true;
+    var constraints = { audio: false, video: { facingMode: { ideal: facing } } };
+    var timedOut = false;
+
+    // Some mobile browsers can leave getUserMedia() hanging indefinitely --
+    // most often because another app or tab already has the camera open.
+    // A watchdog timer means the user always gets a clear message instead
+    // of a permanent "Starting..." with no way forward.
+    var getStream = navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
+      if (timedOut) {
+        stream.getTracks().forEach(function(t){ t.stop(); });
+        return Promise.reject(new Error('TIMEOUT_LATE'));
+      }
+      return stream;
+    });
+    var watchdog = new Promise(function(_, reject){
+      setTimeout(function(){ timedOut = true; reject(new Error('TIMEOUT')); }, 12000);
+    });
+
+    return Promise.race([getStream, watchdog]).then(function(stream){
+      if (currentStream) currentStream.getTracks().forEach(function(t){ t.stop(); });
+      currentStream = stream;
+      els.video.srcObject = stream;
+      els.video.style.transform = facing === 'user' ? 'scaleX(-1)' : 'none';
+      els.gate.hidden = true;
+    }).catch(function(err){
+      els.camErr.hidden = false;
+      if (err && err.message === 'TIMEOUT') {
+        els.camErr.textContent = 'Camera is taking too long to start. Close any other app or tab that might be using it (another Vellum tab, a camera app, a video call), then try again.';
+      } else {
+        els.camErr.textContent = err && err.name === 'NotAllowedError'
+          ? 'Camera access was denied. Allow it in your browser settings, then try again.'
+          : 'Could not start the camera (' + (err && err.message ? err.message : 'unknown error') + ').';
+      }
+      throw err;
+    });
+  }
+
+  els.enableCamBtn.addEventListener('click', function(){
+    if (els.enableCamBtn.disabled) return;
+    els.enableCamBtn.disabled = true;
+    els.enableCamBtn.textContent = 'Starting…';
+    startCamera().then(function(){
+      els.enableCamBtn.disabled = false;
+    }).catch(function(){
+      els.enableCamBtn.textContent = 'Enable camera';
+      els.enableCamBtn.disabled = false;
+    });
+  });
+
+  els.loadBtn.addEventListener('click', function(){ els.fileInput.click(); });
+  els.fileInput.addEventListener('change', function(){
+    var file = els.fileInput.files && els.fileInput.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      els.overlayImg.src = String(reader.result);
+      sampleLoaded = false;
+      els.samplePill.hidden = true;
+      state.x = 0; state.y = 0; state.scale = 1; state.rotation = 0;
+      els.rotationSlider.value = 0;
+      els.rotationVal.textContent = '0°';
+      applyTransform();
+    };
+    reader.readAsDataURL(file);
+  });
+
+  els.lockBtn.addEventListener('click', function(){
+    state.locked = !state.locked;
+    els.lockBtn.classList.toggle('locked', state.locked);
+    els.lockLabel.textContent = state.locked ? 'Unlock' : 'Lock';
+  });
+
+  var pointers = new Map();
+  var gestureStart = null;
+
+  function dist(a, b){ return Math.hypot(b.x - a.x, b.y - a.y); }
+  function angle(a, b){ return Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI; }
+
+  function beginGesture(){
+    var pts = Array.from(pointers.values());
+    if (pts.length === 2) {
+      gestureStart = {
+        dist: dist(pts[0], pts[1]),
+        angle: angle(pts[0], pts[1]),
+        mid: { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 },
+        state: Object.assign({}, state),
+      };
+    } else if (pts.length === 1) {
+      gestureStart = { single: { x: pts[0].x, y: pts[0].y }, state: Object.assign({}, state) };
+    } else {
+      gestureStart = null;
+    }
+  }
+
+  els.stage.addEventListener('pointerdown', function(e){
+    if (state.locked) return;
+    els.stage.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    beginGesture();
+  });
+
+  els.stage.addEventListener('pointermove', function(e){
+    if (state.locked || !pointers.has(e.pointerId) || !gestureStart) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    var pts = Array.from(pointers.values());
+    if (pts.length === 2 && gestureStart.dist) {
+      var d = dist(pts[0], pts[1]);
+      var a = angle(pts[0], pts[1]);
+      var mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+      state.scale = clamp(gestureStart.state.scale * (d / gestureStart.dist), 0.15, 8);
+      state.rotation = gestureStart.state.rotation + (a - gestureStart.angle);
+      state.x = gestureStart.state.x + (mid.x - gestureStart.mid.x);
+      state.y = gestureStart.state.y + (mid.y - gestureStart.mid.y);
+      els.rotationSlider.value = Math.round(((state.rotation % 360) + 540) % 360 - 180);
+      els.rotationVal.textContent = Math.round(state.rotation % 360) + '°';
+      applyTransform();
+    } else if (pts.length === 1 && gestureStart.single) {
+      state.x = gestureStart.state.x + (pts[0].x - gestureStart.single.x);
+      state.y = gestureStart.state.y + (pts[0].y - gestureStart.single.y);
+      applyTransform();
+    }
+  });
+
+  function endPointer(e){
+    pointers.delete(e.pointerId);
+    beginGesture();
+  }
+  els.stage.addEventListener('pointerup', endPointer);
+  els.stage.addEventListener('pointercancel', endPointer);
+
+  els.stage.addEventListener('wheel', function(e){
+    if (state.locked) return;
+    e.preventDefault();
+    state.scale = clamp(state.scale * (e.deltaY < 0 ? 1.06 : 0.94), 0.15, 8);
+    applyTransform();
+  }, { passive: false });
+
+  function openSheet(el){ el.hidden = false; }
+  function closeSheet(el){ el.hidden = true; }
+  els.adjustBtn.addEventListener('click', function(){ openSheet(els.adjustWrap); });
+  els.closeAdjust.addEventListener('click', function(){ closeSheet(els.adjustWrap); });
+  els.adjustWrap.addEventListener('click', function(e){ if (e.target === els.adjustWrap) closeSheet(els.adjustWrap); });
+
+  els.helpBtn.addEventListener('click', function(){ openSheet(els.helpWrap); });
+  els.closeHelp.addEventListener('click', function(){ closeSheet(els.helpWrap); });
+  els.helpWrap.addEventListener('click', function(e){ if (e.target === els.helpWrap) closeSheet(els.helpWrap); });
+
+  els.opacitySlider.addEventListener('input', function(){
+    state.opacity = Number(els.opacitySlider.value) / 100;
+    els.opacityVal.textContent = els.opacitySlider.value + '%';
+    applyTransform();
+    prefs.opacity = state.opacity; savePrefs(prefs);
+  });
+
+  els.rotationSlider.addEventListener('input', function(){
+    state.rotation = Number(els.rotationSlider.value);
+    els.rotationVal.textContent = Math.round(state.rotation) + '°';
+    applyTransform();
+  });
+
+  els.mirrorToggle.addEventListener('change', function(){
+    state.mirrored = els.mirrorToggle.checked;
+    applyTransform();
+    prefs.mirrored = state.mirrored; savePrefs(prefs);
+  });
+
+  els.gridToggle.addEventListener('change', function(){
+    els.gridLayer.classList.toggle('on', els.gridToggle.checked);
+  });
+
+  els.cameraToggle.addEventListener('change', function(){
+    facing = els.cameraToggle.checked ? 'user' : 'environment';
+    startCamera().catch(function(){});
+  });
+
+  els.resetBtn.addEventListener('click', function(){
+    state.x = 0; state.y = 0; state.scale = 1; state.rotation = 0;
+    els.rotationSlider.value = 0; els.rotationVal.textContent = '0°';
+    applyTransform();
+  });
+
+  els.fullscreenBtn.addEventListener('click', function(){
+    try {
+      if (document.fullscreenElement) { document.exitFullscreen(); }
+      else if (document.documentElement.requestFullscreen) { document.documentElement.requestFullscreen(); }
+    } catch (e) { /* fullscreen not available in this context -- ignore */ }
+  });
+  if (!document.fullscreenEnabled) { els.fullscreenBtn.hidden = true; }
+
+})();
+</script>
+</body>
+</html>
