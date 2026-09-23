@@ -50,6 +50,14 @@
   main.stage video{
     position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
   }
+  /* Everything that zooms together: camera feed, grid, and overlay. */
+  .view{position:absolute;inset:0;transform-origin:0 0;}
+  .zoom-pill{
+    position:absolute;bottom:12px;right:12px;z-index:6;
+    background:rgba(28,28,31,0.85);border:1px solid var(--line);color:var(--ink);
+    font-family:'Space Mono',ui-monospace,monospace;font-size:0.72rem;padding:5px 12px;border-radius:999px;cursor:pointer;
+  }
+  .zoom-pill[hidden]{display:none;}
   .overlay-img{
     position:absolute;left:50%;top:50%;width:60vw;max-width:640px;height:auto;
     transform-origin:center center;pointer-events:none;
@@ -205,6 +213,7 @@
 </header>
 
 <main class="stage" id="stage">
+  <div class="view" id="view">
   <video id="video" autoplay playsinline muted></video>
   <div class="grid-layer" id="gridLayer">
     <svg viewBox="0 0 300 300" preserveAspectRatio="none">
@@ -217,6 +226,8 @@
     </svg>
   </div>
   <img class="overlay-img" id="overlayImg" alt="Reference overlay" />
+  </div>
+  <button class="zoom-pill" id="zoomPill" hidden></button>
   <div class="sample-pill" id="samplePill">Sample sketch — load your own image below</div>
 
   <div class="gate" id="gate">
@@ -329,7 +340,7 @@
       <div class="step"><span class="n mono">1</span><span>Tap <b>Image</b> to load your reference photo or sketch from your camera roll.</span></div>
       <div class="step"><span class="n mono">2</span><span>Drag with one finger to move it, or pinch with two fingers to resize and rotate it against the wall.</span></div>
       <div class="step"><span class="n mono">3</span><span>Once it's lined up, tap <b>Lock</b> so it can't shift while you trace. Tap it again to unlock and reposition.</span></div>
-      <div class="step"><span class="n mono">4</span><span>While locked, swipe one finger left for a stronger image, right to fade it out.</span></div>
+      <div class="step"><span class="n mono">4</span><span>While locked, swipe one finger left for a stronger image, right to fade it out. Pinch with two fingers to zoom in on the view (image and camera together); tap the zoom badge to zoom back out.</span></div>
       <div class="step"><span class="n mono">5</span><span><b>Adjust</b> has fine opacity and rotation sliders, a mirror flip, a grid, and a camera switch.</span></div>
       <div class="step"><span class="n mono">6</span><span><b>Two phones:</b> on the tripod phone, tap <b>This is the tripod camera</b>. Scan its code with your other phone, then hold that phone's reply code up to the tripod phone's back camera. No Wi-Fi network needed — turn on one phone's hotspot and join it from the other.</span></div>
     </div>
@@ -384,6 +395,8 @@
     dimLayer: document.getElementById('dimLayer'),
     pairPreviewWrap: document.getElementById('pairPreviewWrap'),
     pairPreview: document.getElementById('pairPreview'),
+    view: document.getElementById('view'),
+    zoomPill: document.getElementById('zoomPill'),
   };
 
   function loadPrefs(){
@@ -520,6 +533,7 @@
 
   els.lockBtn.addEventListener('click', function(){
     state.locked = !state.locked;
+    lockPts.clear(); zoomStart = null; opacitySwipe = null;
     els.lockBtn.classList.toggle('locked', state.locked);
     els.lockLabel.textContent = state.locked ? 'Unlock' : 'Lock';
   });
@@ -529,6 +543,38 @@
   // While locked, one finger swiped sideways fades the image: left = stronger,
   // right = fainter. No on-screen control -- a full-width swipe covers 0-100%.
   var opacitySwipe = null;
+  // Also while locked, two fingers zoom and pan the whole view -- camera
+  // feed and overlay together, so the tracing lines stay lined up.
+  var lockPts = new Map();
+  var zoomStart = null;
+  var view = { z: 1, x: 0, y: 0 };
+
+  function applyView(){
+    els.view.style.transform = view.z > 1
+      ? 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.z + ')' : '';
+    els.zoomPill.hidden = view.z <= 1.01;
+    els.zoomPill.textContent = view.z.toFixed(1) + '× · tap to reset';
+  }
+  // Clamp so the zoomed view always covers the whole screen.
+  function setView(z, x, y){
+    var w = els.stage.clientWidth, h = els.stage.clientHeight;
+    view.z = clamp(z, 1, 8);
+    view.x = clamp(x, w - w * view.z, 0);
+    view.y = clamp(y, h - h * view.z, 0);
+    applyView();
+  }
+  function stagePoint(x, y){
+    var r = els.stage.getBoundingClientRect();
+    return { x: x - r.left, y: y - r.top };
+  }
+  // Zoom to z while keeping the content that was under `from` under `to`.
+  function zoomAround(from, to, base, z){
+    z = clamp(z, 1, 8);
+    var k = z / base.z;
+    setView(z, to.x - (from.x - base.x) * k, to.y - (from.y - base.y) * k);
+  }
+  els.zoomPill.addEventListener('click', function(){ setView(1, 0, 0); });
+  window.addEventListener('resize', function(){ setView(view.z, view.x, view.y); });
 
   function setOpacity(v){
     state.opacity = clamp(v, 0, 1);
@@ -563,11 +609,23 @@
     // Same for the two-phone pairing card and status bar buttons, and the
     // tripod phone has no overlay to move at all.
     if (!els.gate.hidden || remote.role === 'camera') return;
-    if (e.target.closest && e.target.closest('.pair, .link-bar')) return;
+    if (e.target.closest && e.target.closest('.pair, .link-bar, .zoom-pill')) return;
     if (state.locked) {
-      if (opacitySwipe) return;
       els.stage.setPointerCapture(e.pointerId);
-      opacitySwipe = { id: e.pointerId, x: e.clientX, opacity: state.opacity };
+      lockPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (lockPts.size === 1) {
+        opacitySwipe = { id: e.pointerId, x: e.clientX, opacity: state.opacity };
+      } else if (lockPts.size === 2) {
+        // A second finger means zoom, not fade: undo any fade the first
+        // finger started.
+        if (opacitySwipe) { setOpacity(opacitySwipe.opacity); opacitySwipe = null; }
+        var lp = Array.from(lockPts.values());
+        zoomStart = {
+          dist: dist(lp[0], lp[1]),
+          mid: stagePoint((lp[0].x + lp[1].x) / 2, (lp[0].y + lp[1].y) / 2),
+          view: Object.assign({}, view),
+        };
+      }
       return;
     }
     els.stage.setPointerCapture(e.pointerId);
@@ -576,8 +634,15 @@
   });
 
   els.stage.addEventListener('pointermove', function(e){
-    if (opacitySwipe && e.pointerId === opacitySwipe.id) {
-      setOpacity(opacitySwipe.opacity - (e.clientX - opacitySwipe.x) / els.stage.clientWidth);
+    if (lockPts.has(e.pointerId)) {
+      lockPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (opacitySwipe && e.pointerId === opacitySwipe.id) {
+        setOpacity(opacitySwipe.opacity - (e.clientX - opacitySwipe.x) / els.stage.clientWidth);
+      } else if (zoomStart && lockPts.size >= 2) {
+        var zp = Array.from(lockPts.values());
+        var m = stagePoint((zp[0].x + zp[1].x) / 2, (zp[0].y + zp[1].y) / 2);
+        zoomAround(zoomStart.mid, m, zoomStart.view, zoomStart.view.z * dist(zp[0], zp[1]) / zoomStart.dist);
+      }
       return;
     }
     if (state.locked || !pointers.has(e.pointerId) || !gestureStart) return;
@@ -589,22 +654,29 @@
       var mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
       state.scale = clamp(gestureStart.state.scale * (d / gestureStart.dist), 0.15, 8);
       state.rotation = gestureStart.state.rotation + (a - gestureStart.angle);
-      state.x = gestureStart.state.x + (mid.x - gestureStart.mid.x);
-      state.y = gestureStart.state.y + (mid.y - gestureStart.mid.y);
+      // Divide by the view zoom so the image tracks your fingers when zoomed in.
+      state.x = gestureStart.state.x + (mid.x - gestureStart.mid.x) / view.z;
+      state.y = gestureStart.state.y + (mid.y - gestureStart.mid.y) / view.z;
       els.rotationSlider.value = Math.round(((state.rotation % 360) + 540) % 360 - 180);
       els.rotationVal.textContent = Math.round(state.rotation % 360) + '°';
       applyTransform();
     } else if (pts.length === 1 && gestureStart.single) {
-      state.x = gestureStart.state.x + (pts[0].x - gestureStart.single.x);
-      state.y = gestureStart.state.y + (pts[0].y - gestureStart.single.y);
+      state.x = gestureStart.state.x + (pts[0].x - gestureStart.single.x) / view.z;
+      state.y = gestureStart.state.y + (pts[0].y - gestureStart.single.y) / view.z;
       applyTransform();
     }
   });
 
   function endPointer(e){
-    if (opacitySwipe && e.pointerId === opacitySwipe.id) {
-      opacitySwipe = null;
-      prefs.opacity = state.opacity; savePrefs(prefs);
+    if (lockPts.has(e.pointerId)) {
+      lockPts.delete(e.pointerId);
+      if (opacitySwipe && e.pointerId === opacitySwipe.id) {
+        opacitySwipe = null;
+        prefs.opacity = state.opacity; savePrefs(prefs);
+      }
+      // Lifting one finger of a pinch ends the zoom; the finger left behind
+      // doesn't turn into a fade.
+      if (lockPts.size < 2) zoomStart = null;
       return;
     }
     pointers.delete(e.pointerId);
@@ -614,8 +686,12 @@
   els.stage.addEventListener('pointercancel', endPointer);
 
   els.stage.addEventListener('wheel', function(e){
-    if (state.locked) return;
     e.preventDefault();
+    if (state.locked) {
+      var p = stagePoint(e.clientX, e.clientY);
+      zoomAround(p, p, view, view.z * (e.deltaY < 0 ? 1.1 : 0.9));
+      return;
+    }
     state.scale = clamp(state.scale * (e.deltaY < 0 ? 1.06 : 0.94), 0.15, 8);
     applyTransform();
   }, { passive: false });
