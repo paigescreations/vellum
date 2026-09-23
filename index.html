@@ -137,6 +137,54 @@
   .help-body .step{display:flex;gap:10px;align-items:flex-start;}
   .help-body .step .n{font-family:'Space Mono',monospace;color:var(--accent);font-weight:700;flex:none;}
 
+  /* Two-phone mode */
+  .two-phone{margin-top:10px;padding-top:16px;border-top:1px solid var(--line);width:100%;display:flex;flex-direction:column;gap:10px;}
+  .two-phone .label{font-size:0.75rem;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.04em;}
+  .two-phone-btns{display:flex;gap:8px;}
+  .two-phone-btns .btn{flex:1;padding:11px 8px;font-size:0.84rem;}
+
+  .pair{
+    position:absolute;inset:0;z-index:25;display:flex;align-items:center;justify-content:center;
+    padding:16px;background:rgba(18,18,20,0.94);
+  }
+  .pair[hidden]{display:none;}
+  .pair.scan{background:transparent;align-items:flex-end;}
+  .scan-frame{
+    position:absolute;left:50%;top:40%;width:min(60vw,260px);aspect-ratio:1;transform:translate(-50%,-50%);
+    border:2px solid var(--accent);border-radius:14px;box-shadow:0 0 0 9999px rgba(0,0,0,0.35);pointer-events:none;
+  }
+  .pair:not(.scan) .scan-frame{display:none;}
+  .pair-card{
+    position:relative;background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:16px;max-width:420px;width:100%;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;
+  }
+  .pair-card h2{font-size:1.15rem;font-style:italic;}
+  .pair-card p{margin:0;color:var(--ink-soft);font-size:0.88rem;line-height:1.5;}
+  .qr{background:#fff;border-radius:10px;line-height:0;overflow:hidden;}
+  .qr[hidden]{display:none;}
+  .qr canvas{width:min(78vw,50vh,360px);height:auto;image-rendering:pixelated;}
+
+  .link-bar{
+    position:absolute;left:12px;bottom:12px;z-index:24;display:flex;align-items:center;gap:8px;
+    background:rgba(28,28,31,0.9);border:1px solid var(--line);border-radius:999px;padding:5px 5px 5px 12px;font-size:0.78rem;
+  }
+  .link-bar[hidden]{display:none;}
+  .link-bar .dot{width:8px;height:8px;border-radius:50%;background:var(--locked);flex:none;}
+  .link-bar.warn .dot{background:var(--accent);}
+  .link-bar.bad .dot{background:var(--danger);}
+  .btn.small{padding:6px 12px;font-size:0.75rem;border-radius:999px;}
+  .btn[hidden]{display:none;}
+  .dim{
+    position:fixed;inset:0;background:#000;z-index:100;display:flex;align-items:flex-end;justify-content:center;
+    padding-bottom:48px;color:#3a3a3a;font-size:0.8rem;
+  }
+  .dim[hidden]{display:none;}
+
+  body.mode-camera .overlay-img, body.mode-camera .grid-layer, body.mode-camera .sample-pill, body.mode-camera footer.dock,
+  body.pairing .overlay-img, body.pairing .grid-layer, body.pairing .sample-pill, body.pairing footer.dock{display:none;}
+  body.mode-viewer main.stage video, body.mode-camera main.stage video{object-fit:contain;}
+  body.mode-viewer #cameraRow, body.mode-camera #cameraRow{display:none;}
+
   @media (max-width:380px){
     .gate-card h1{font-size:1.7rem;}
   }
@@ -174,9 +222,35 @@
       <p>Vellum needs your camera to work.</p>
       <button class="btn primary" id="enableCamBtn">Enable camera</button>
       <div class="err" id="camErr" hidden></div>
+      <div class="two-phone">
+        <span class="label">Using two phones?</span>
+        <div class="two-phone-btns">
+          <button class="btn ghost" id="asCameraBtn">This is the tripod camera</button>
+          <button class="btn ghost" id="asViewerBtn">This is my viewer</button>
+        </div>
+      </div>
     </div>
   </div>
+
+  <div class="pair" id="pairPanel" hidden>
+    <div class="scan-frame"></div>
+    <div class="pair-card">
+      <h2 id="pairTitle"></h2>
+      <div class="qr" id="pairQr" hidden></div>
+      <p id="pairText"></p>
+      <div class="err" id="pairErr" hidden></div>
+      <button class="btn ghost" id="pairCancel">Cancel</button>
+    </div>
+  </div>
+
+  <div class="link-bar" id="linkBar" hidden>
+    <span class="dot"></span><span id="linkText"></span>
+    <button class="btn ghost small" id="dimBtn" hidden>Dim screen</button>
+    <button class="btn ghost small" id="endBtn">End</button>
+  </div>
 </main>
+
+<div class="dim" id="dimLayer" hidden>Tap anywhere to wake the screen</div>
 
 <footer class="dock">
   <button class="dock-btn" id="loadBtn">
@@ -209,7 +283,7 @@
 
     <div class="row">
       <div class="row-head"><span>Opacity</span><b class="mono" id="opacityVal">50%</b></div>
-      <input type="range" id="opacitySlider" min="10" max="90" value="50" />
+      <input type="range" id="opacitySlider" min="0" max="100" value="50" />
     </div>
     <div class="row">
       <div class="row-head"><span>Rotation</span><b class="mono" id="rotationVal">0°</b></div>
@@ -225,7 +299,7 @@
         <span>Grid overlay</span>
         <label class="switch"><input type="checkbox" id="gridToggle" /><span class="track"></span><span class="knob"></span></label>
       </div>
-      <div class="switch-row">
+      <div class="switch-row" id="cameraRow">
         <span>Front camera</span>
         <label class="switch"><input type="checkbox" id="cameraToggle" /><span class="track"></span><span class="knob"></span></label>
       </div>
@@ -247,11 +321,14 @@
       <div class="step"><span class="n mono">1</span><span>Tap <b>Image</b> to load your reference photo or sketch from your camera roll.</span></div>
       <div class="step"><span class="n mono">2</span><span>Drag with one finger to move it, or pinch with two fingers to resize and rotate it against the wall.</span></div>
       <div class="step"><span class="n mono">3</span><span>Once it's lined up, tap <b>Lock</b> so it can't shift while you trace. Tap it again to unlock and reposition.</span></div>
-      <div class="step"><span class="n mono">4</span><span><b>Adjust</b> has fine opacity and rotation sliders, a mirror flip, a grid, and a camera switch.</span></div>
+      <div class="step"><span class="n mono">4</span><span>While locked, swipe one finger left for a stronger image, right to fade it out.</span></div>
+      <div class="step"><span class="n mono">5</span><span><b>Adjust</b> has fine opacity and rotation sliders, a mirror flip, a grid, and a camera switch.</span></div>
+      <div class="step"><span class="n mono">6</span><span><b>Two phones:</b> on the tripod phone, tap <b>This is the tripod camera</b>. Scan its code with your other phone, then hold that phone's reply code up to the tripod phone's back camera. No Wi-Fi network needed — turn on one phone's hotspot and join it from the other.</span></div>
     </div>
   </div>
 </div>
 
+<script src="qrcode.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -284,6 +361,19 @@
     cameraToggle: document.getElementById('cameraToggle'),
     resetBtn: document.getElementById('resetBtn'),
     fullscreenBtn: document.getElementById('fullscreenBtn'),
+    asCameraBtn: document.getElementById('asCameraBtn'),
+    asViewerBtn: document.getElementById('asViewerBtn'),
+    pairPanel: document.getElementById('pairPanel'),
+    pairTitle: document.getElementById('pairTitle'),
+    pairQr: document.getElementById('pairQr'),
+    pairText: document.getElementById('pairText'),
+    pairErr: document.getElementById('pairErr'),
+    pairCancel: document.getElementById('pairCancel'),
+    linkBar: document.getElementById('linkBar'),
+    linkText: document.getElementById('linkText'),
+    dimBtn: document.getElementById('dimBtn'),
+    endBtn: document.getElementById('endBtn'),
+    dimLayer: document.getElementById('dimLayer'),
   };
 
   function loadPrefs(){
@@ -357,9 +447,18 @@
     return Promise.race([getStream, watchdog]);
   }
 
-  function startCamera(){
+  function cameraErrorText(err){
+    if (err && err.message === 'TIMEOUT') return 'Camera is taking too long to start. Close any other app or tab that might be using it (another Vellum tab, a camera app, a video call), then try again.';
+    if (err && err.name === 'NotAllowedError') return 'Camera access was denied. Allow it in your browser settings, then try again.';
+    return 'Could not start the camera (' + (err && err.message ? err.message : 'unknown error') + ').';
+  }
+
+  // hd: ask for a sharper picture -- used by the tripod phone, whose video
+  // is what the viewer phone traces from.
+  function startCamera(hd){
     els.camErr.hidden = true;
     var specific = { audio: false, video: { facingMode: { ideal: facing } } };
+    if (hd) { specific.video.width = { ideal: 1920 }; specific.video.height = { ideal: 1080 }; }
 
     return requestStream(specific, 8000).catch(function(err){
       if (err && err.message !== 'TIMEOUT') throw err;
@@ -375,13 +474,7 @@
       els.gate.hidden = true;
     }).catch(function(err){
       els.camErr.hidden = false;
-      if (err && err.message === 'TIMEOUT') {
-        els.camErr.textContent = 'Camera is taking too long to start. Close any other app or tab that might be using it (another Vellum tab, a camera app, a video call), then try again.';
-      } else {
-        els.camErr.textContent = err && err.name === 'NotAllowedError'
-          ? 'Camera access was denied. Allow it in your browser settings, then try again.'
-          : 'Could not start the camera (' + (err && err.message ? err.message : 'unknown error') + ').';
-      }
+      els.camErr.textContent = cameraErrorText(err);
       throw err;
     });
   }
@@ -423,6 +516,16 @@
 
   var pointers = new Map();
   var gestureStart = null;
+  // While locked, one finger swiped sideways fades the image: left = stronger,
+  // right = fainter. No on-screen control -- a full-width swipe covers 0-100%.
+  var opacitySwipe = null;
+
+  function setOpacity(v){
+    state.opacity = clamp(v, 0, 1);
+    els.opacitySlider.value = Math.round(state.opacity * 100);
+    els.opacityVal.textContent = els.opacitySlider.value + '%';
+    applyTransform();
+  }
 
   function dist(a, b){ return Math.hypot(b.x - a.x, b.y - a.y); }
   function angle(a, b){ return Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI; }
@@ -447,13 +550,26 @@
     // While the permission gate (or any sheet) is showing, this is not the
     // drawing surface yet -- don't capture the pointer, or clicks on the
     // gate's own buttons (like "Enable camera") never reach them.
-    if (state.locked || !els.gate.hidden) return;
+    // Same for the two-phone pairing card and status bar buttons, and the
+    // tripod phone has no overlay to move at all.
+    if (!els.gate.hidden || remote.role === 'camera') return;
+    if (e.target.closest && e.target.closest('.pair, .link-bar')) return;
+    if (state.locked) {
+      if (opacitySwipe) return;
+      els.stage.setPointerCapture(e.pointerId);
+      opacitySwipe = { id: e.pointerId, x: e.clientX, opacity: state.opacity };
+      return;
+    }
     els.stage.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     beginGesture();
   });
 
   els.stage.addEventListener('pointermove', function(e){
+    if (opacitySwipe && e.pointerId === opacitySwipe.id) {
+      setOpacity(opacitySwipe.opacity - (e.clientX - opacitySwipe.x) / els.stage.clientWidth);
+      return;
+    }
     if (state.locked || !pointers.has(e.pointerId) || !gestureStart) return;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     var pts = Array.from(pointers.values());
@@ -476,6 +592,11 @@
   });
 
   function endPointer(e){
+    if (opacitySwipe && e.pointerId === opacitySwipe.id) {
+      opacitySwipe = null;
+      prefs.opacity = state.opacity; savePrefs(prefs);
+      return;
+    }
     pointers.delete(e.pointerId);
     beginGesture();
   }
@@ -500,9 +621,7 @@
   els.helpWrap.addEventListener('click', function(e){ if (e.target === els.helpWrap) closeSheet(els.helpWrap); });
 
   els.opacitySlider.addEventListener('input', function(){
-    state.opacity = Number(els.opacitySlider.value) / 100;
-    els.opacityVal.textContent = els.opacitySlider.value + '%';
-    applyTransform();
+    setOpacity(Number(els.opacitySlider.value) / 100);
     prefs.opacity = state.opacity; savePrefs(prefs);
   });
 
@@ -540,6 +659,406 @@
     } catch (e) { /* fullscreen not available in this context -- ignore */ }
   });
   if (!document.fullscreenEnabled) { els.fullscreenBtn.hidden = true; }
+
+  // ---------------------------------------------------------------------
+  // Two-phone mode: the tripod phone streams its camera straight to the
+  // viewer phone over WebRTC. There is no server -- the phones swap two QR
+  // codes to find each other, then talk directly (same hotspot/Wi-Fi works
+  // best). The reference image never leaves the viewer phone.
+  //
+  // The QR codes only set up a tiny data-channel connection (a full video
+  // offer is too big to scan reliably). Once that's open, the video is added
+  // and negotiated over the data channel itself.
+  // ---------------------------------------------------------------------
+  var ICE_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+  var ANSWER_PREFIX = 'VA~';
+  var remote = { role: null, pc: null, dc: null, sender: null, scanToken: null, connected: false };
+
+  function b64urlEncode(bytes){
+    var s = '';
+    bytes.forEach(function(b){ s += String.fromCharCode(b); });
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function b64urlDecode(str){
+    var s = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+    var out = [];
+    for (var i = 0; i < s.length; i++) out.push(s.charCodeAt(i));
+    return out;
+  }
+
+  var SETUP_CODES = { actpass: 'x', active: 'a', passive: 'p' };
+  var SETUP_NAMES = { x: 'actpass', a: 'active', p: 'passive' };
+
+  // Squeeze a local description down to just what the other phone needs:
+  // version~setup~ufrag~pwd~fingerprint~mid~session~candidates
+  function encodeDesc(sdp){
+    function get(re){ var m = sdp.match(re); return m ? m[1] : ''; }
+    var fp = get(/a=fingerprint:sha-256 (\S+)/i);
+    var o = sdp.match(/o=\S+ (\d+) (\d+)/);
+    var cands = [];
+    sdp.split(/\r?\n/).forEach(function(line){
+      var m = line.match(/^a=candidate:\S+ 1 udp \d+ (\S+) (\d+) typ (host|srflx)/i);
+      if (!m || cands.length >= 8) return;
+      var c = (m[3].toLowerCase() === 'host' ? 'h' : 's') + ',' + m[1] + ',' + m[2];
+      if (cands.indexOf(c) < 0) cands.push(c);
+    });
+    if (!fp || !cands.length) throw new Error('NO_ROUTE');
+    return ['1',
+      SETUP_CODES[get(/a=setup:(\S+)/)] || 'x',
+      get(/a=ice-ufrag:(\S+)/),
+      get(/a=ice-pwd:(\S+)/),
+      b64urlEncode(fp.split(':').map(function(h){ return parseInt(h, 16); })),
+      get(/a=mid:(\S+)/) || '0',
+      o ? o[1] + '.' + o[2] : '1.2',
+      cands.join(';')].join('~');
+  }
+
+  function decodeDesc(code, type){
+    var p = code.split('~');
+    if (p[0] !== '1' || p.length < 8) throw new Error('BAD_CODE');
+    var fp = b64urlDecode(p[4]).map(function(b){ return ('0' + b.toString(16).toUpperCase()).slice(-2); }).join(':');
+    var sess = p[6].split('.');
+    var lines = [
+      'v=0', 'o=- ' + sess[0] + ' ' + (sess[1] || '2') + ' IN IP4 127.0.0.1', 's=-', 't=0 0',
+      'a=group:BUNDLE ' + p[5], 'a=msid-semantic: WMS',
+      'm=application 9 UDP/DTLS/SCTP webrtc-datachannel', 'c=IN IP4 0.0.0.0',
+      'a=ice-ufrag:' + p[2], 'a=ice-pwd:' + p[3], 'a=ice-options:trickle',
+      'a=fingerprint:sha-256 ' + fp, 'a=setup:' + (SETUP_NAMES[p[1]] || 'actpass'),
+      'a=mid:' + p[5], 'a=sctp-port:5000', 'a=max-message-size:262144'
+    ];
+    p[7].split(';').forEach(function(c, i){
+      var f = c.split(',');
+      var host = f[0] === 'h';
+      lines.push('a=candidate:' + (i + 1) + ' 1 udp ' + ((host ? 2130706431 : 1694498815) - i) + ' ' +
+        f[1] + ' ' + f[2] + ' typ ' + (host ? 'host' : 'srflx raddr 0.0.0.0 rport 0'));
+    });
+    return { type: type, sdp: lines.join('\r\n') + '\r\n' };
+  }
+
+  // Wait for the network addresses to be gathered -- but not forever: with
+  // no internet (hotspot only), the STUN lookup never answers.
+  function gathered(pc){
+    return new Promise(function(resolve){
+      if (pc.iceGatheringState === 'complete') return resolve();
+      var t = setTimeout(resolve, 3000);
+      pc.addEventListener('icegatheringstatechange', function(){
+        if (pc.iceGatheringState === 'complete') { clearTimeout(t); resolve(); }
+      });
+    });
+  }
+
+  // --- QR drawing and scanning ---
+  function renderQr(text){
+    var qr = qrcode(0, 'M');
+    qr.addData(text);
+    qr.make();
+    var n = qr.getModuleCount(), quiet = 4, px = 8, size = (n + quiet * 2) * px;
+    var c = document.createElement('canvas');
+    c.width = c.height = size;
+    var g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, size, size);
+    g.fillStyle = '#000';
+    for (var r = 0; r < n; r++) {
+      for (var col = 0; col < n; col++) {
+        if (qr.isDark(r, col)) g.fillRect((col + quiet) * px, (r + quiet) * px, px, px);
+      }
+    }
+    els.pairQr.innerHTML = '';
+    els.pairQr.appendChild(c);
+  }
+
+  // Android Chrome has a built-in QR reader; everything else (e.g. iPhone
+  // Safari) uses jsQR, loaded from this same site only when needed.
+  var detector = null;
+  function loadJsQR(){
+    if (window.jsQR || document.getElementById('jsqrScript')) return;
+    var s = document.createElement('script');
+    s.id = 'jsqrScript'; s.src = 'jsQR.min.js';
+    document.head.appendChild(s);
+  }
+  if ('BarcodeDetector' in window) {
+    window.BarcodeDetector.getSupportedFormats().then(function(f){
+      if (f.indexOf('qr_code') >= 0) detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      else loadJsQR();
+    }).catch(loadJsQR);
+  } else {
+    loadJsQR();
+  }
+
+  var scanCanvas = document.createElement('canvas');
+  function readFrame(){
+    var v = els.video;
+    if (!v.videoWidth || v.readyState < 2) return Promise.resolve(null);
+    if (detector) {
+      return detector.detect(v).then(function(r){ return r.length ? r[0].rawValue : null; })
+        .catch(function(){ detector = null; loadJsQR(); return null; });
+    }
+    if (!window.jsQR) return Promise.resolve(null);
+    var k = Math.min(1, 800 / v.videoWidth);
+    var w = Math.round(v.videoWidth * k), h = Math.round(v.videoHeight * k);
+    scanCanvas.width = w; scanCanvas.height = h;
+    var g = scanCanvas.getContext('2d', { willReadFrequently: true });
+    g.drawImage(v, 0, 0, w, h);
+    var hit = window.jsQR(g.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
+    return Promise.resolve(hit ? hit.data : null);
+  }
+
+  // Keep reading QR codes from the camera until onText() says it found
+  // the one it wants (returns true).
+  function startScan(onText){
+    var token = {};
+    remote.scanToken = token;
+    (function tick(){
+      if (remote.scanToken !== token) return;
+      readFrame().then(function(text){
+        if (remote.scanToken !== token) return;
+        if (text && onText(text) === true) { remote.scanToken = null; return; }
+        setTimeout(tick, 200);
+      });
+    })();
+  }
+  function stopScan(){ remote.scanToken = null; }
+
+  // --- Screen state ---
+  function showPair(o){
+    els.pairPanel.hidden = false;
+    els.pairPanel.classList.toggle('scan', !!o.scan);
+    els.pairTitle.textContent = o.title;
+    els.pairText.textContent = o.text;
+    els.pairErr.hidden = true;
+    els.pairCancel.textContent = 'Cancel';
+    if (o.qr) { renderQr(o.qr); els.pairQr.hidden = false; }
+    else { els.pairQr.hidden = true; els.pairQr.innerHTML = ''; }
+  }
+  function failPair(err){
+    stopScan();
+    els.pairPanel.hidden = false;
+    els.pairPanel.classList.remove('scan');
+    els.pairQr.hidden = true;
+    els.pairErr.hidden = false;
+    els.pairErr.textContent = err && err.pairMessage ? err.pairMessage
+      : (err && err.message === 'BAD_CODE') ? "That QR code isn't a Vellum pairing code."
+      : (err && err.message === 'NO_ROUTE') ? "This phone isn't on any network. Turn on one phone's hotspot and join it from the other, then start over."
+      : (err && (err.name === 'NotAllowedError' || /TIMEOUT/.test(err.message))) ? cameraErrorText(err)
+      : 'Something went wrong (' + (err && err.message ? err.message : 'unknown error') + ').';
+    els.pairCancel.textContent = 'Start over';
+  }
+  function setLink(kind, text, endLabel){
+    els.linkBar.hidden = false;
+    els.linkBar.className = 'link-bar' + (kind ? ' ' + kind : '');
+    els.linkText.textContent = text;
+    els.dimBtn.hidden = remote.role !== 'camera';
+    els.endBtn.textContent = endLabel || 'End';
+  }
+
+  var wakeLock = null;
+  function keepAwake(){
+    if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+    navigator.wakeLock.request('screen').then(function(l){ wakeLock = l; }).catch(function(){});
+  }
+  document.addEventListener('visibilitychange', function(){ if (remote.role) keepAwake(); });
+
+  function enterRole(role){
+    remote.role = role;
+    document.body.classList.add('mode-' + role, 'pairing');
+    els.gate.hidden = true;
+    keepAwake();
+  }
+
+  function endSession(){
+    stopScan();
+    try { if (remote.pc) remote.pc.close(); } catch (e) {}
+    if (currentStream) currentStream.getTracks().forEach(function(t){ t.stop(); });
+    location.replace(location.pathname + location.search);
+  }
+  els.pairCancel.addEventListener('click', endSession);
+  els.endBtn.addEventListener('click', endSession);
+  els.dimBtn.addEventListener('click', function(){ els.dimLayer.hidden = false; });
+  els.dimLayer.addEventListener('click', function(){ els.dimLayer.hidden = true; });
+
+  // --- The connection (shared by both phones) ---
+  function newPeer(){
+    var pc = new RTCPeerConnection(ICE_CONFIG);
+    var dc = pc.createDataChannel('vellum', { negotiated: true, id: 0 });
+    remote.pc = pc; remote.dc = dc;
+    dc.onmessage = onPeerMessage;
+    // The data channel opening -- not the ICE state -- is the real "we're
+    // paired" signal: ICE on the viewer can report connected before the
+    // tripod has even scanned the reply code.
+    dc.addEventListener('open', linkUp);
+    pc.onicecandidate = function(e){
+      if (e.candidate && dc.readyState === 'open') dc.send(JSON.stringify({ candidate: e.candidate }));
+    };
+    pc.oniceconnectionstatechange = onLinkState;
+    return pc;
+  }
+
+  function onPeerMessage(e){
+    var msg;
+    try { msg = JSON.parse(e.data); } catch (_) { return; }
+    var pc = remote.pc;
+    if (msg.sdp && msg.sdp.type === 'offer') {
+      pc.setRemoteDescription(msg.sdp)
+        .then(function(){ return pc.createAnswer(); })
+        .then(function(a){ return pc.setLocalDescription(a); })
+        .then(function(){ remote.dc.send(JSON.stringify({ sdp: pc.localDescription })); })
+        .catch(function(err){ console.error('Vellum: renegotiation failed', err); });
+    } else if (msg.sdp && msg.sdp.type === 'answer') {
+      pc.setRemoteDescription(msg.sdp)
+        .then(function(){ if (remote.sender) tuneSender(remote.sender); })
+        .catch(function(err){ console.error('Vellum: renegotiation failed', err); });
+    } else if (msg.candidate) {
+      pc.addIceCandidate(msg.candidate).catch(function(){});
+    }
+  }
+
+  function linkUp(){
+    remote.connected = true;
+    stopScan();
+    els.pairPanel.hidden = true;
+    if (remote.role === 'viewer') {
+      document.body.classList.remove('pairing');
+      setLink('', 'Live from tripod');
+    } else {
+      setLink('', 'Streaming to viewer');
+    }
+  }
+
+  function onLinkState(){
+    var s = remote.pc.iceConnectionState;
+    if ((s === 'connected' || s === 'completed') && remote.connected) {
+      linkUp();
+    } else if (s === 'disconnected' && remote.connected) {
+      setLink('warn', 'Reconnecting…');
+    } else if (s === 'failed') {
+      if (remote.connected) setLink('bad', 'Connection lost', 'Start over');
+      else failPair({ pairMessage: "The phones couldn't reach each other. Make sure both are on the same hotspot or Wi-Fi, then start over." });
+    }
+  }
+
+  // Favor a sharp picture over a smooth one -- you're tracing lines, and the
+  // phones are right next to each other, so there's bandwidth to spare.
+  function tuneSender(sender){
+    try {
+      var p = sender.getParameters();
+      if (!p.encodings || !p.encodings.length) return;
+      p.encodings[0].maxBitrate = 6000000;
+      sender.setParameters(p).catch(function(){});
+    } catch (e) {}
+  }
+
+  // --- Tripod phone ---
+  function startTripod(){
+    facing = 'environment';
+    enterRole('camera');
+    showPair({ title: 'Tripod camera', text: 'Starting the camera…' });
+    var pc;
+    startCamera(true).then(function(){
+      showPair({ title: 'Tripod camera', text: 'Making the pairing code…' });
+      pc = newPeer();
+      var stream = currentStream;
+      remote.dc.onopen = function(){
+        var track = stream.getVideoTracks()[0];
+        try { track.contentHint = 'detail'; } catch (e) {}
+        remote.sender = pc.addTrack(track, stream);
+      };
+      pc.onnegotiationneeded = function(){
+        if (remote.dc.readyState !== 'open') return;
+        pc.createOffer()
+          .then(function(o){ return pc.setLocalDescription(o); })
+          .then(function(){ remote.dc.send(JSON.stringify({ sdp: pc.localDescription })); })
+          .catch(function(err){ console.error('Vellum: renegotiation failed', err); });
+      };
+      return pc.createOffer();
+    }).then(function(offer){
+      return pc.setLocalDescription(offer);
+    }).then(function(){
+      return gathered(pc);
+    }).then(function(){
+      var url = location.origin + location.pathname + '#o=' + encodeDesc(pc.localDescription.sdp);
+      showPair({
+        title: 'Step 1 of 2',
+        qr: url,
+        text: "Scan this with your other phone's camera app (or open Vellum there and tap \"This is my viewer\"). It will show a code of its own — hold that up to this phone's back camera."
+      });
+      startScan(function(text){
+        if (text.indexOf(ANSWER_PREFIX) !== 0) return false;
+        try {
+          pc.setRemoteDescription(decodeDesc(text.slice(ANSWER_PREFIX.length), 'answer')).catch(failPair);
+          showPair({ title: 'Got it', text: 'Connecting to your viewer…' });
+        } catch (err) { failPair(err); }
+        return true;
+      });
+    }).catch(failPair);
+  }
+
+  // --- Viewer phone ---
+  function offerFromText(text){
+    var i = text.indexOf('#o=');
+    var code = i >= 0 ? text.slice(i + 3) : text;
+    try { code = decodeURIComponent(code); } catch (e) {}
+    return /^1~/.test(code) ? code : null;
+  }
+
+  function releaseCamera(){
+    if (currentStream) currentStream.getTracks().forEach(function(t){ t.stop(); });
+    currentStream = null;
+    els.video.srcObject = null;
+  }
+
+  function answerOffer(code){
+    stopScan();
+    showPair({ title: 'Connecting', text: 'Making your reply code…' });
+    var pc = newPeer();
+    pc.ontrack = function(e){
+      els.video.srcObject = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
+      els.video.style.transform = 'none';
+      var p = els.video.play();
+      if (p && p.catch) p.catch(function(){});
+    };
+    var desc;
+    try { desc = decodeDesc(code, 'offer'); } catch (err) { return failPair(err); }
+    pc.setRemoteDescription(desc)
+      .then(function(){ return pc.createAnswer(); })
+      .then(function(a){ return pc.setLocalDescription(a); })
+      .then(function(){ return gathered(pc); })
+      .then(function(){
+        var reply = ANSWER_PREFIX + encodeDesc(pc.localDescription.sdp);
+        releaseCamera();
+        if (remote.connected) return;
+        showPair({
+          title: 'Step 2 of 2',
+          qr: reply,
+          text: "Hold this screen up to the tripod phone's back camera, about a hand's length away, until it connects."
+        });
+      })
+      .catch(failPair);
+  }
+
+  function startViewer(){
+    enterRole('viewer');
+    showPair({ title: 'Viewer', text: 'Starting the camera to scan…', scan: true });
+    startCamera().then(function(){
+      showPair({ title: 'Step 1 of 2', text: 'Point this phone at the QR code on the tripod phone.', scan: true });
+      startScan(function(text){
+        var code = offerFromText(text);
+        if (!code) return false;
+        answerOffer(code);
+        return true;
+      });
+    }).catch(failPair);
+  }
+
+  els.asCameraBtn.addEventListener('click', startTripod);
+  els.asViewerBtn.addEventListener('click', startViewer);
+
+  // Opened by scanning the tripod's code with the phone's own camera app.
+  var linkedOffer = location.hash.indexOf('#o=') === 0 ? offerFromText(location.hash) : null;
+  if (linkedOffer) {
+    history.replaceState(null, '', location.pathname + location.search);
+    enterRole('viewer');
+    answerOffer(linkedOffer);
+  }
 
 })();
 </script>
