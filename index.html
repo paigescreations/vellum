@@ -179,6 +179,7 @@
   .link-bar{
     position:absolute;left:12px;bottom:12px;z-index:24;display:flex;align-items:center;gap:8px;
     background:rgba(28,28,31,0.9);border:1px solid var(--line);border-radius:999px;padding:5px 5px 5px 12px;font-size:0.78rem;
+    max-width:calc(100% - 24px);flex-wrap:wrap;
   }
   .link-bar[hidden]{display:none;}
   .link-bar .dot{width:8px;height:8px;border-radius:50%;background:var(--locked);flex:none;}
@@ -195,6 +196,7 @@
   body.mode-camera .overlay-img, body.mode-camera .grid-layer, body.mode-camera .sample-pill, body.mode-camera footer.dock,
   body.pairing .overlay-img, body.pairing .grid-layer, body.pairing .sample-pill, body.pairing footer.dock{display:none;}
   body.mode-viewer main.stage video, body.mode-camera main.stage video{object-fit:contain;}
+  body.pairing .view{transform:none !important;}
   body.mode-viewer #cameraRow, body.mode-camera #cameraRow{display:none;}
 
   @media (max-width:380px){
@@ -264,7 +266,9 @@
 
   <div class="link-bar" id="linkBar" hidden>
     <span class="dot"></span><span id="linkText"></span>
+    <button class="btn ghost small" id="sendBtn" hidden>Send image</button>
     <button class="btn ghost small" id="dimBtn" hidden>Dim screen</button>
+    <button class="btn primary small" id="reconnectBtn" hidden>Reconnect</button>
     <button class="btn ghost small" id="endBtn">End</button>
   </div>
 </main>
@@ -293,6 +297,7 @@
 </footer>
 
 <input type="file" accept="image/*" id="fileInput" hidden />
+<input type="file" accept="image/*" id="sendInput" hidden />
 
 <div class="sheet-wrap" id="adjustWrap" hidden>
   <div class="sheet">
@@ -343,6 +348,7 @@
       <div class="step"><span class="n mono">4</span><span>While locked, swipe one finger left for a stronger image, right to fade it out. Pinch with two fingers to zoom in on the view (image and camera together); tap the zoom badge to zoom back out.</span></div>
       <div class="step"><span class="n mono">5</span><span><b>Adjust</b> has fine opacity and rotation sliders, a mirror flip, a grid, and a camera switch.</span></div>
       <div class="step"><span class="n mono">6</span><span><b>Two phones:</b> on the tripod phone, tap <b>This is the tripod camera</b>. Scan its code with your other phone, then hold that phone's reply code up to the tripod phone's back camera. No Wi-Fi network needed — turn on one phone's hotspot and join it from the other.</span></div>
+      <div class="step"><span class="n mono">7</span><span>Your image lives on the viewer. You can load it there with <b>Image</b>, or tap <b>Send image</b> on the tripod to send one across — the tripod never shows it. If the connection drops, tap <b>Reconnect</b> on both; your image and its position stay put.</span></div>
     </div>
   </div>
 </div>
@@ -392,6 +398,9 @@
     linkText: document.getElementById('linkText'),
     dimBtn: document.getElementById('dimBtn'),
     endBtn: document.getElementById('endBtn'),
+    reconnectBtn: document.getElementById('reconnectBtn'),
+    sendBtn: document.getElementById('sendBtn'),
+    sendInput: document.getElementById('sendInput'),
     dimLayer: document.getElementById('dimLayer'),
     pairPreviewWrap: document.getElementById('pairPreviewWrap'),
     pairPreview: document.getElementById('pairPreview'),
@@ -493,6 +502,13 @@
       if (currentStream) currentStream.getTracks().forEach(function(t){ t.stop(); });
       currentStream = stream;
       els.video.srcObject = stream;
+      // On the tripod, if something takes the camera away while the page is
+      // still showing (e.g. the photo picker for Send image), take it back.
+      if (remote.role === 'camera') {
+        stream.getVideoTracks()[0].addEventListener('ended', function(){
+          if (document.visibilityState === 'visible') setTimeout(reviveCamera, 800);
+        });
+      }
       els.video.style.transform = facing === 'user' ? 'scaleX(-1)' : 'none';
       els.gate.hidden = true;
     }).catch(function(err){
@@ -515,19 +531,26 @@
   });
 
   els.loadBtn.addEventListener('click', function(){ els.fileInput.click(); });
+  // Show a new reference image, from this phone's picker or sent over from
+  // the tripod. In memory only -- never saved anywhere.
+  var overlayObjectUrl = null;
+  function showReference(src){
+    if (overlayObjectUrl && overlayObjectUrl !== src) URL.revokeObjectURL(overlayObjectUrl);
+    overlayObjectUrl = /^blob:/.test(src) ? src : null;
+    els.overlayImg.src = src;
+    sampleLoaded = false;
+    els.samplePill.hidden = true;
+    state.x = 0; state.y = 0; state.scale = 1; state.rotation = 0;
+    els.rotationSlider.value = 0;
+    els.rotationVal.textContent = '0°';
+    applyTransform();
+  }
+
   els.fileInput.addEventListener('change', function(){
     var file = els.fileInput.files && els.fileInput.files[0];
     if (!file) return;
     var reader = new FileReader();
-    reader.onload = function(){
-      els.overlayImg.src = String(reader.result);
-      sampleLoaded = false;
-      els.samplePill.hidden = true;
-      state.x = 0; state.y = 0; state.scale = 1; state.rotation = 0;
-      els.rotationSlider.value = 0;
-      els.rotationVal.textContent = '0°';
-      applyTransform();
-    };
+    reader.onload = function(){ showReference(String(reader.result)); };
     reader.readAsDataURL(file);
   });
 
@@ -954,14 +977,15 @@
       : (err && err.message === 'NO_ROUTE') ? "This phone isn't on any network. Turn on one phone's hotspot and join it from the other, then start over."
       : (err && (err.name === 'NotAllowedError' || /TIMEOUT/.test(err.message))) ? cameraErrorText(err)
       : 'Something went wrong (' + (err && err.message ? err.message : 'unknown error') + ').';
-    els.pairCancel.textContent = 'Start over';
+    els.pairCancel.textContent = remote.everConnected ? 'Back' : 'Start over';
   }
-  function setLink(kind, text, endLabel){
+  function setLink(kind, text, offerReconnect){
     els.linkBar.hidden = false;
     els.linkBar.className = 'link-bar' + (kind ? ' ' + kind : '');
     els.linkText.textContent = text;
-    els.dimBtn.hidden = remote.role !== 'camera';
-    els.endBtn.textContent = endLabel || 'End';
+    els.dimBtn.hidden = remote.role !== 'camera' || !!offerReconnect;
+    els.sendBtn.hidden = remote.role !== 'camera' || !!offerReconnect;
+    els.reconnectBtn.hidden = !offerReconnect;
   }
 
   var wakeLock = null;
@@ -969,7 +993,37 @@
     if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
     navigator.wakeLock.request('screen').then(function(l){ wakeLock = l; }).catch(function(){});
   }
-  document.addEventListener('visibilitychange', function(){ if (remote.role) keepAwake(); });
+
+  // Leaving the browser (to grab a photo, answer a text...) makes the OS
+  // switch the tripod's camera off and pause the page. On the way back,
+  // restart the camera and slip it into the existing connection -- if the
+  // connection itself survived the trip, nothing needs re-pairing.
+  function reviveCamera(){
+    var t = currentStream && currentStream.getVideoTracks()[0];
+    if (t && t.readyState === 'live' && !t.muted) return;
+    startCamera(true).then(function(){
+      var nt = currentStream.getVideoTracks()[0];
+      try { nt.contentHint = 'detail'; } catch (e) {}
+      if (remote.sender) remote.sender.replaceTrack(nt).catch(function(){});
+      if (!els.pairPreviewWrap.hidden) els.pairPreview.srcObject = currentStream;
+    }).catch(function(){});
+  }
+  function cameraReady(){
+    var t = currentStream && currentStream.getVideoTracks()[0];
+    return t && t.readyState === 'live' ? Promise.resolve() : startCamera(true);
+  }
+
+  document.addEventListener('visibilitychange', function(){
+    if (!remote.role || document.visibilityState !== 'visible') return;
+    keepAwake();
+    if (remote.role === 'camera') {
+      // Give the OS a moment to hand the camera back on its own first.
+      setTimeout(reviveCamera, 1200);
+    } else if (els.video.srcObject) {
+      var p = els.video.play();
+      if (p && p.catch) p.catch(function(){});
+    }
+  });
 
   function enterRole(role){
     remote.role = role;
@@ -979,13 +1033,57 @@
   }
 
   function endSession(){
+    if (remote.role === 'viewer' && remote.everConnected &&
+        !window.confirm('End the session? Your image and its position will be cleared.')) return;
     stopScan();
     try { if (remote.pc) remote.pc.close(); } catch (e) {}
     if (currentStream) currentStream.getTracks().forEach(function(t){ t.stop(); });
     location.replace(location.pathname + location.search);
   }
-  els.pairCancel.addEventListener('click', endSession);
+
+  // Tear down just the connection -- the camera, image, position, opacity,
+  // lock, and zoom all stay -- so a fresh pairing picks up where you were.
+  function dropPeer(){
+    stopScan();
+    var pc = remote.pc;
+    if (pc) {
+      pc.oniceconnectionstatechange = null;
+      pc.onnegotiationneeded = null;
+      pc.onicecandidate = null;
+      pc.ontrack = null;
+      if (remote.dc) { remote.dc.onmessage = null; remote.dc.onopen = null; }
+      try { pc.close(); } catch (e) {}
+    }
+    remote.pc = null; remote.dc = null; remote.sender = null; remote.connected = false;
+  }
+
+  function reconnect(){
+    dropPeer();
+    els.linkBar.hidden = true;
+    if (remote.role === 'camera') {
+      showPair({ title: 'Reconnecting', text: 'Starting the camera…' });
+      cameraReady().then(tripodPair).catch(failPair);
+    } else {
+      viewerScan();
+    }
+  }
+
+  // Cancel before ever connecting = start over. Cancel on a re-pair = go
+  // back to where you were, image and all.
+  function cancelPair(){
+    if (!remote.everConnected) return endSession();
+    dropPeer();
+    if (remote.role === 'viewer') {
+      releaseCamera();
+      document.body.classList.remove('pairing');
+    }
+    els.pairPanel.hidden = true;
+    setLink('bad', 'Not connected', true);
+  }
+
+  els.pairCancel.addEventListener('click', cancelPair);
   els.endBtn.addEventListener('click', endSession);
+  els.reconnectBtn.addEventListener('click', reconnect);
   els.dimBtn.addEventListener('click', function(){ els.dimLayer.hidden = false; });
   els.dimLayer.addEventListener('click', function(){ els.dimLayer.hidden = true; });
 
@@ -994,6 +1092,7 @@
     var pc = new RTCPeerConnection(ICE_CONFIG);
     var dc = pc.createDataChannel('vellum', { negotiated: true, id: 0 });
     remote.pc = pc; remote.dc = dc;
+    dc.binaryType = 'arraybuffer';
     dc.onmessage = onPeerMessage;
     // The data channel opening -- not the ICE state -- is the real "we're
     // paired" signal: ICE on the viewer can report connected before the
@@ -1007,10 +1106,13 @@
   }
 
   function onPeerMessage(e){
+    if (typeof e.data !== 'string') { receiveImageChunk(e.data); return; }
     var msg;
     try { msg = JSON.parse(e.data); } catch (_) { return; }
     var pc = remote.pc;
-    if (msg.sdp && msg.sdp.type === 'offer') {
+    if (msg.img) {
+      onImageMessage(msg);
+    } else if (msg.sdp && msg.sdp.type === 'offer') {
       pc.setRemoteDescription(msg.sdp)
         .then(function(){ return pc.createAnswer(); })
         .then(function(a){ return pc.setLocalDescription(a); })
@@ -1027,6 +1129,7 @@
 
   function linkUp(){
     remote.connected = true;
+    remote.everConnected = true;
     stopScan();
     els.pairPanel.hidden = true;
     if (remote.role === 'viewer') {
@@ -1042,9 +1145,9 @@
     if ((s === 'connected' || s === 'completed') && remote.connected) {
       linkUp();
     } else if (s === 'disconnected' && remote.connected) {
-      setLink('warn', 'Reconnecting…');
+      setLink('warn', 'Reconnecting…', true);
     } else if (s === 'failed') {
-      if (remote.connected) setLink('bad', 'Connection lost', 'Start over');
+      if (remote.connected) setLink('bad', 'Connection lost', true);
       else failPair({ pairMessage: "The phones couldn't reach each other. Make sure both are on the same hotspot or Wi-Fi, then start over." });
     }
   }
@@ -1060,40 +1163,110 @@
     } catch (e) {}
   }
 
+  // --- Sending the reference image from the tripod to the viewer ---
+  // Straight down the existing phone-to-phone connection (encrypted, no
+  // server). The tripod never displays it and keeps no copy -- anyone
+  // looking at the tripod only sees the camera view.
+  var IMG_CHUNK = 16384;
+  var linkRestore = null;
+  function flashLink(text, ms){
+    setLink('', text);
+    clearTimeout(linkRestore);
+    if (ms) linkRestore = setTimeout(function(){ if (remote.connected) linkUp(); }, ms);
+  }
+
+  function sendImage(file){
+    var dc = remote.dc;
+    if (!dc || dc.readyState !== 'open') return;
+    if (file.size > 40 * 1024 * 1024) { flashLink('That image is too big (over 40 MB)', 4000); return; }
+    flashLink('Sending image…');
+    file.arrayBuffer().then(function(buf){
+      var total = buf.byteLength, off = 0;
+      dc.bufferedAmountLowThreshold = 1024 * 1024;
+      dc.send(JSON.stringify({ img: 'start', size: total, type: file.type || 'image/jpeg' }));
+      (function pump(){
+        while (off < total) {
+          if (dc.readyState !== 'open') return;
+          if (dc.bufferedAmount > 4 * 1024 * 1024) {
+            dc.addEventListener('bufferedamountlow', pump, { once: true });
+            return;
+          }
+          dc.send(buf.slice(off, off + IMG_CHUNK));
+          off += IMG_CHUNK;
+          els.linkText.textContent = 'Sending image… ' + Math.min(99, Math.round(off / total * 100)) + '%';
+        }
+        dc.send(JSON.stringify({ img: 'end' }));
+      })();
+    }).catch(function(){ flashLink("Couldn't read that image", 4000); });
+  }
+  els.sendBtn.addEventListener('click', function(){ els.sendInput.click(); });
+  els.sendInput.addEventListener('change', function(){
+    var file = els.sendInput.files && els.sendInput.files[0];
+    els.sendInput.value = '';
+    if (file) sendImage(file);
+  });
+
+  var incoming = null;
+  function onImageMessage(msg){
+    if (msg.img === 'start') {
+      incoming = { parts: [], got: 0, size: msg.size, type: msg.type };
+      flashLink('Receiving image…');
+    } else if (msg.img === 'end' && incoming) {
+      showReference(URL.createObjectURL(new Blob(incoming.parts, { type: incoming.type })));
+      incoming = null;
+      remote.dc.send(JSON.stringify({ img: 'ok' }));
+      flashLink('Image received', 2500);
+    } else if (msg.img === 'ok') {
+      flashLink('Image sent', 2500);
+    }
+  }
+  function receiveImageChunk(chunk){
+    if (!incoming) return;
+    incoming.parts.push(chunk);
+    incoming.got += chunk.byteLength;
+    els.linkText.textContent = 'Receiving image… ' + Math.min(99, Math.round(incoming.got / incoming.size * 100)) + '%';
+  }
+
   // --- Tripod phone ---
   function startTripod(){
     facing = 'environment';
     enterRole('camera');
     showPair({ title: 'Tripod camera', text: 'Starting the camera…' });
-    var pc;
-    startCamera(true).then(function(){
-      showPair({ title: 'Tripod camera', text: 'Making the pairing code…' });
-      pc = newPeer();
-      var stream = currentStream;
-      remote.dc.onopen = function(){
-        var track = stream.getVideoTracks()[0];
-        try { track.contentHint = 'detail'; } catch (e) {}
-        remote.sender = pc.addTrack(track, stream);
-      };
-      pc.onnegotiationneeded = function(){
-        if (remote.dc.readyState !== 'open') return;
-        pc.createOffer()
-          .then(function(o){ return pc.setLocalDescription(o); })
-          .then(function(){ remote.dc.send(JSON.stringify({ sdp: pc.localDescription })); })
-          .catch(function(err){ console.error('Vellum: renegotiation failed', err); });
-      };
-      return pc.createOffer();
-    }).then(function(offer){
+    startCamera(true).then(tripodPair).catch(failPair);
+  }
+
+  // Make a pairing code and wait for the viewer's reply. Runs again on
+  // Reconnect with the camera already going.
+  function tripodPair(){
+    showPair({ title: 'Tripod camera', text: 'Making the pairing code…' });
+    var pc = newPeer();
+    remote.dc.onopen = function(){
+      // Use whatever camera is live right now -- it may have been restarted.
+      var track = currentStream.getVideoTracks()[0];
+      try { track.contentHint = 'detail'; } catch (e) {}
+      remote.sender = pc.addTrack(track, currentStream);
+    };
+    pc.onnegotiationneeded = function(){
+      if (remote.dc.readyState !== 'open') return;
+      pc.createOffer()
+        .then(function(o){ return pc.setLocalDescription(o); })
+        .then(function(){ remote.dc.send(JSON.stringify({ sdp: pc.localDescription })); })
+        .catch(function(err){ console.error('Vellum: renegotiation failed', err); });
+    };
+    pc.createOffer().then(function(offer){
       return pc.setLocalDescription(offer);
     }).then(function(){
       return gathered(pc);
     }).then(function(){
+      if (remote.pc !== pc) return;
       var url = location.origin + location.pathname + '#o=' + encodeDesc(pc.localDescription.sdp);
       showPair({
         title: 'Step 1 of 2',
         qr: url,
         preview: true,
-        text: "Scan this with your other phone's camera app (or open Vellum there and tap \"This is my viewer\"). It will show a code of its own — hold that up to this phone's back camera until the code shows up clearly in the small picture below."
+        text: remote.everConnected
+          ? "Tap Reconnect on your viewer too, and point it at this code. Then hold the viewer's reply code up to this phone's back camera until it shows up clearly in the small picture below."
+          : "Scan this with your other phone's camera app (or open Vellum there and tap \"This is my viewer\"). It will show a code of its own — hold that up to this phone's back camera until the code shows up clearly in the small picture below."
       });
       startScan(function(text){
         if (text.indexOf(ANSWER_PREFIX) !== 0) return false;
@@ -1151,9 +1324,23 @@
 
   function startViewer(){
     enterRole('viewer');
+    viewerScan();
+  }
+
+  // Scan the tripod's code with Vellum's own scanner. Runs again on
+  // Reconnect -- in the same page, so the image and its position survive
+  // (the phone's camera app would open a fresh page instead).
+  function viewerScan(){
+    document.body.classList.add('pairing');
     showPair({ title: 'Viewer', text: 'Starting the camera to scan…', scan: true });
     startCamera().then(function(){
-      showPair({ title: 'Step 1 of 2', text: 'Point this phone at the QR code on the tripod phone.', scan: true });
+      showPair({
+        title: 'Step 1 of 2',
+        scan: true,
+        text: remote.everConnected
+          ? 'Tap Reconnect on the tripod phone too, then point this phone at its new QR code.'
+          : 'Point this phone at the QR code on the tripod phone.'
+      });
       startScan(function(text){
         var code = offerFromText(text);
         if (!code) return false;
