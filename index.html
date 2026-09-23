@@ -144,18 +144,22 @@
   .two-phone-btns .btn{flex:1;padding:11px 8px;font-size:0.84rem;}
 
   .pair{
-    position:absolute;inset:0;z-index:25;display:flex;align-items:center;justify-content:center;
+    position:absolute;inset:0;z-index:25;display:flex;overflow-y:auto;
     padding:16px;background:rgba(18,18,20,0.94);
   }
   .pair[hidden]{display:none;}
-  .pair.scan{background:transparent;align-items:flex-end;}
+  .pair.scan{background:transparent;}
+  .pair.scan .pair-card{margin:auto auto 0;}
+  .pair-preview{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:0.72rem;color:var(--ink-soft);}
+  .pair-preview[hidden]{display:none;}
+  main.stage .pair-preview video{position:static;height:auto;width:min(46vw,200px);aspect-ratio:4/3;object-fit:cover;border-radius:8px;background:#000;border:1px solid var(--line);}
   .scan-frame{
     position:absolute;left:50%;top:40%;width:min(60vw,260px);aspect-ratio:1;transform:translate(-50%,-50%);
     border:2px solid var(--accent);border-radius:14px;box-shadow:0 0 0 9999px rgba(0,0,0,0.35);pointer-events:none;
   }
   .pair:not(.scan) .scan-frame{display:none;}
   .pair-card{
-    position:relative;background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    position:relative;margin:auto;background:var(--panel);border:1px solid var(--line);border-radius:16px;
     padding:16px;max-width:420px;width:100%;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;
   }
   .pair-card h2{font-size:1.15rem;font-style:italic;}
@@ -238,6 +242,10 @@
       <h2 id="pairTitle"></h2>
       <div class="qr" id="pairQr" hidden></div>
       <p id="pairText"></p>
+      <div class="pair-preview" id="pairPreviewWrap" hidden>
+        <video id="pairPreview" autoplay playsinline muted></video>
+        <span>What this phone's back camera sees</span>
+      </div>
       <div class="err" id="pairErr" hidden></div>
       <button class="btn ghost" id="pairCancel">Cancel</button>
     </div>
@@ -374,6 +382,8 @@
     dimBtn: document.getElementById('dimBtn'),
     endBtn: document.getElementById('endBtn'),
     dimLayer: document.getElementById('dimLayer'),
+    pairPreviewWrap: document.getElementById('pairPreviewWrap'),
+    pairPreview: document.getElementById('pairPreview'),
   };
 
   function loadPrefs(){
@@ -695,13 +705,19 @@
     function get(re){ var m = sdp.match(re); return m ? m[1] : ''; }
     var fp = get(/a=fingerprint:sha-256 (\S+)/i);
     var o = sdp.match(/o=\S+ (\d+) (\d+)/);
-    var cands = [];
+    // Keep the code small enough to scan off a phone screen: a real phone
+    // can list many long IPv6 addresses, but two phones on the same
+    // hotspot/Wi-Fi only need a local IPv4 address (plus one public one).
+    var ipv4 = [], mdns = [], pub = [];
     sdp.split(/\r?\n/).forEach(function(line){
       var m = line.match(/^a=candidate:\S+ 1 udp \d+ (\S+) (\d+) typ (host|srflx)/i);
-      if (!m || cands.length >= 8) return;
-      var c = (m[3].toLowerCase() === 'host' ? 'h' : 's') + ',' + m[1] + ',' + m[2];
-      if (cands.indexOf(c) < 0) cands.push(c);
+      if (!m || m[1].indexOf(':') >= 0) return;
+      var host = m[3].toLowerCase() === 'host';
+      var c = (host ? 'h' : 's') + ',' + m[1] + ',' + m[2];
+      var list = !host ? pub : /\.local$/i.test(m[1]) ? mdns : ipv4;
+      if (list.indexOf(c) < 0) list.push(c);
     });
+    var cands = ipv4.slice(0, 2).concat(ipv4.length ? [] : mdns.slice(0, 1), pub.slice(0, 1));
     if (!fp || !cands.length) throw new Error('NO_ROUTE');
     return ['1',
       SETUP_CODES[get(/a=setup:(\S+)/)] || 'x',
@@ -749,7 +765,9 @@
 
   // --- QR drawing and scanning ---
   function renderQr(text){
-    var qr = qrcode(0, 'M');
+    // Low error correction = fewer, bigger squares. A lit screen is a clean
+    // source, so the extra redundancy isn't worth the harder scan.
+    var qr = qrcode(0, 'L');
     qr.addData(text);
     qr.make();
     var n = qr.getModuleCount(), quiet = 4, px = 8, size = (n + quiet * 2) * px;
@@ -786,6 +804,7 @@
   }
 
   var scanCanvas = document.createElement('canvas');
+  var scanFrameNo = 0;
   function readFrame(){
     var v = els.video;
     if (!v.videoWidth || v.readyState < 2) return Promise.resolve(null);
@@ -794,11 +813,19 @@
         .catch(function(){ detector = null; loadJsQR(); return null; });
     }
     if (!window.jsQR) return Promise.resolve(null);
-    var k = Math.min(1, 800 / v.videoWidth);
-    var w = Math.round(v.videoWidth * k), h = Math.round(v.videoHeight * k);
+    // Alternate between the whole frame (shrunk) and the middle of the frame
+    // at full sharpness -- shrinking a whole HD frame makes a code held in
+    // the middle too small to read.
+    var vw = v.videoWidth, vh = v.videoHeight, sx = 0, sy = 0, sw = vw, sh = vh;
+    if (scanFrameNo++ % 2) {
+      sw = sh = Math.round(Math.min(vw, vh) * 0.75);
+      sx = Math.round((vw - sw) / 2); sy = Math.round((vh - sh) / 2);
+    }
+    var k = Math.min(1, 800 / Math.max(sw, sh));
+    var w = Math.round(sw * k), h = Math.round(sh * k);
     scanCanvas.width = w; scanCanvas.height = h;
     var g = scanCanvas.getContext('2d', { willReadFrequently: true });
-    g.drawImage(v, 0, 0, w, h);
+    g.drawImage(v, sx, sy, sw, sh, 0, 0, w, h);
     var hit = window.jsQR(g.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
     return Promise.resolve(hit ? hit.data : null);
   }
@@ -810,11 +837,13 @@
     remote.scanToken = token;
     (function tick(){
       if (remote.scanToken !== token) return;
-      readFrame().then(function(text){
+      var read;
+      try { read = readFrame(); } catch (e) { read = Promise.resolve(null); }
+      read.then(function(text){
         if (remote.scanToken !== token) return;
         if (text && onText(text) === true) { remote.scanToken = null; return; }
-        setTimeout(tick, 200);
-      });
+        setTimeout(tick, 150);
+      }, function(){ setTimeout(tick, 150); });
     })();
   }
   function stopScan(){ remote.scanToken = null; }
@@ -829,6 +858,14 @@
     els.pairCancel.textContent = 'Cancel';
     if (o.qr) { renderQr(o.qr); els.pairQr.hidden = false; }
     else { els.pairQr.hidden = true; els.pairQr.innerHTML = ''; }
+    els.pairPreviewWrap.hidden = !o.preview;
+    if (o.preview) {
+      els.pairPreview.srcObject = currentStream;
+      var p = els.pairPreview.play();
+      if (p && p.catch) p.catch(function(){});
+    } else {
+      els.pairPreview.srcObject = null;
+    }
   }
   function failPair(err){
     stopScan();
@@ -979,7 +1016,8 @@
       showPair({
         title: 'Step 1 of 2',
         qr: url,
-        text: "Scan this with your other phone's camera app (or open Vellum there and tap \"This is my viewer\"). It will show a code of its own — hold that up to this phone's back camera."
+        preview: true,
+        text: "Scan this with your other phone's camera app (or open Vellum there and tap \"This is my viewer\"). It will show a code of its own — hold that up to this phone's back camera until the code shows up clearly in the small picture below."
       });
       startScan(function(text){
         if (text.indexOf(ANSWER_PREFIX) !== 0) return false;
@@ -1029,7 +1067,7 @@
         showPair({
           title: 'Step 2 of 2',
           qr: reply,
-          text: "Hold this screen up to the tripod phone's back camera, about a hand's length away, until it connects."
+          text: "Turn this phone's brightness up, then hold this screen up to the tripod phone's back camera, about a hand's length away and straight on, until it connects. Nothing to tap."
         });
       })
       .catch(failPair);
