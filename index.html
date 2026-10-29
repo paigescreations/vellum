@@ -248,6 +248,26 @@
     background:var(--accent);transition:background .2s;
   }
   .level.good-roll .level-bubble{background:var(--locked);}
+  .level{width:216px;}
+  .level-body{display:flex;gap:10px;align-items:stretch;}
+  .level-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;}
+  .level-vtrack{position:relative;width:16px;min-height:72px;flex:none;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);}
+  .level-vmid{position:absolute;top:50%;left:2px;right:2px;height:2px;margin-top:-1px;background:var(--ink-soft);}
+  .level-vbubble{
+    position:absolute;left:2px;top:50%;width:10px;height:12px;margin-top:-6px;border-radius:999px;
+    background:var(--accent);transition:background .2s;
+  }
+  .level.good-pitch .level-vbubble{background:var(--locked);}
+  .level-measure{
+    background:var(--panel-2);border:1px solid var(--accent);border-radius:10px;padding:8px;
+    color:var(--ink);font-size:0.85rem;line-height:1.4;text-align:center;
+  }
+  .level-measure[hidden]{display:none;}
+  .level-measure.done{border-color:var(--locked);}
+  .level-measure.fail{border-color:var(--danger);}
+  .level-target{display:flex;align-items:center;justify-content:space-between;gap:6px;}
+  .level-target[hidden]{display:none;}
+  .level-link{background:none;border:none;color:var(--accent);font-size:0.75rem;font-weight:600;cursor:pointer;padding:0;}
   .level-read{color:var(--ink);}
   .level-read.good{color:var(--locked);}
   body.pinning .level{top:auto;bottom:12px;}
@@ -304,9 +324,20 @@
       <span id="levelTitle">Level</span>
       <button class="level-x" id="levelClose" aria-label="Close level">&times;</button>
     </div>
-    <div class="level-track"><span class="level-mid"></span><span class="level-bubble" id="levelBubble"></span></div>
-    <div class="level-read" id="levelRoll">Waiting for the tilt sensor…</div>
-    <div class="level-read" id="levelPitch"></div>
+    <div class="level-body">
+      <div class="level-main">
+        <div class="level-track"><span class="level-mid"></span><span class="level-bubble" id="levelBubble"></span></div>
+        <div class="level-read" id="levelRoll">Waiting for the tilt sensor…</div>
+        <div class="level-read" id="levelPitch"></div>
+      </div>
+      <!-- Up/down: the bubble rises when the camera aims too high. -->
+      <div class="level-vtrack" aria-hidden="true"><span class="level-vmid"></span><span class="level-vbubble" id="levelVBubble"></span></div>
+    </div>
+    <div class="level-measure" id="levelMeasure" hidden></div>
+    <div class="level-target" id="levelTargetRow" hidden>
+      <span id="levelTargetText"></span>
+      <button class="level-link" id="levelTargetReset">Reset</button>
+    </div>
     <button class="btn ghost small" id="levelMatch">Match canvas angle</button>
   </div>
   <div class="sample-pill" id="samplePill">Sample sketch — load your own image below</div>
@@ -507,9 +538,14 @@
     levelTitle: document.getElementById('levelTitle'),
     levelClose: document.getElementById('levelClose'),
     levelBubble: document.getElementById('levelBubble'),
+    levelVBubble: document.getElementById('levelVBubble'),
     levelRoll: document.getElementById('levelRoll'),
     levelPitch: document.getElementById('levelPitch'),
     levelMatch: document.getElementById('levelMatch'),
+    levelMeasure: document.getElementById('levelMeasure'),
+    levelTargetRow: document.getElementById('levelTargetRow'),
+    levelTargetText: document.getElementById('levelTargetText'),
+    levelTargetReset: document.getElementById('levelTargetReset'),
     levelToggle: document.getElementById('levelToggle'),
     levelBtn: document.getElementById('levelBtn'),
   };
@@ -1197,10 +1233,11 @@
     els.levelTitle.textContent = tripod ? 'Tripod level' : 'Level';
     var r = tripod ? level.remote : level.local;
     if (tripod && (!r || Date.now() - level.remoteAt > 3000)) r = null;
-    els.levelBox.classList.remove('good-roll');
+    els.levelBox.classList.remove('good-roll', 'good-pitch');
     els.levelPitch.classList.remove('good');
     if (!r) {
       els.levelBubble.style.left = '50%';
+      els.levelVBubble.style.top = '50%';
       els.levelRoll.textContent = tripod ? (level.remoteNote || 'Waiting for the tripod…') : 'Waiting for the tilt sensor…';
       els.levelPitch.textContent = '';
       return;
@@ -1213,9 +1250,16 @@
     } else {
       els.levelRoll.textContent = (roll > 0 ? 'Right' : 'Left') + ' side high by ' + Math.abs(roll).toFixed(1) + '°';
     }
-    var leanNote = Math.abs(level.target) >= 1
-      ? ' (canvas leans ' + (level.target < 0 ? 'back ' : 'forward ') + Math.abs(level.target).toFixed(0) + '°)' : '';
+    // The canvas angle has its own line now (with a Reset), so it isn't
+    // repeated here.
+    var leanNote = '';
+    // Up/down bubble floats toward the high side, like a real level: up
+    // when the camera aims too high.
+    var vtrack = els.levelVBubble.parentNode.clientHeight || 72;
+    var reach = vtrack / 2 - 8;
+    els.levelVBubble.style.top = 'calc(50% + ' + clamp(-aim * 4, -reach, reach) + 'px)';
     if (Math.abs(aim) < 1) {
+      els.levelBox.classList.add('good-pitch');
       els.levelPitch.classList.add('good');
       els.levelPitch.textContent = 'Square to the canvas ✓' + leanNote;
     } else {
@@ -1246,23 +1290,76 @@
   els.levelBtn.addEventListener('click', function(){ setLevelOn(!level.on); });
   els.levelClose.addEventListener('click', function(){ setLevelOn(false); });
 
+  function leanText(t){
+    if (Math.abs(t) < 1) return '';
+    return 'Canvas leans ' + (t < 0 ? 'back ' : 'forward ') + Math.abs(t).toFixed(0) + '°';
+  }
   function setLevelTarget(t, share){
     level.target = t;
     prefs.levelTarget = t; savePrefs(prefs);
     if (share) sendPeer({ lvlTarget: t });
+    els.levelTargetRow.hidden = !leanText(t);
+    els.levelTargetText.textContent = leanText(t);
     renderLevel();
   }
-  // Uses this device's own sensor, wherever it is -- with two phones, lay
-  // the phone you're holding flat on the canvas; the tripod learns it too.
+  setLevelTarget(level.target, false);
+  els.levelTargetReset.addEventListener('click', function(){ setLevelTarget(0, true); });
+
+  // Measuring the canvas angle: give you time to lay the device flat on the
+  // canvas, then wait for it to be held still before taking the reading.
+  // Uses this device's own sensor -- with two phones, lay the phone you're
+  // holding on the canvas; the tripod learns the angle too. Messages go in
+  // their own box, since the level redraws its other lines constantly.
+  var measure = null;
+  function measureSay(text, kind){
+    els.levelMeasure.hidden = false;
+    els.levelMeasure.className = 'level-measure' + (kind ? ' ' + kind : '');
+    els.levelMeasure.textContent = text;
+  }
+  function stopMeasure(){
+    if (measure) clearInterval(measure.timer);
+    measure = null;
+    els.levelMatch.disabled = false;
+  }
   els.levelMatch.addEventListener('click', function(){
+    if (measure) return;
     startSensing().then(function(){
-      els.levelPitch.classList.remove('good');
-      els.levelPitch.textContent = 'Hold this device flat against the canvas…';
-      setTimeout(function(){
-        if (!level.local) { levelError(); return; }
-        setLevelTarget(Math.round(level.local.pitch * 10) / 10, true);
-      }, 900);
-    }).catch(levelError);
+      var COUNT = 3000, STEADY = 10, GIVE_UP = 12000;
+      var t0 = Date.now(), samples = [];
+      els.levelMatch.disabled = true;
+      measure = { timer: setInterval(function(){
+        var left = COUNT - (Date.now() - t0);
+        if (left > 0) {
+          measureSay('Lay this device flat against the canvas, screen facing you… ' + Math.ceil(left / 1000));
+          return;
+        }
+        if (!level.local) {
+          stopMeasure();
+          measureSay("No tilt readings from this device's sensor.", 'fail');
+          return;
+        }
+        samples.push(level.local.pitch);
+        if (samples.length > STEADY) samples.shift();
+        var lo = Math.min.apply(null, samples), hi = Math.max.apply(null, samples);
+        if (samples.length === STEADY && hi - lo < 0.6) {
+          var avg = samples.reduce(function(a, b){ return a + b; }, 0) / samples.length;
+          stopMeasure();
+          setLevelTarget(Math.round(avg * 10) / 10, true);
+          if (navigator.vibrate) navigator.vibrate(120);
+          measureSay('Saved ✓ ' + (leanText(level.target) || 'Canvas is upright'), 'done');
+          setTimeout(function(){ if (!measure) els.levelMeasure.hidden = true; }, 3500);
+        } else if (Date.now() - t0 > GIVE_UP) {
+          stopMeasure();
+          measureSay("Couldn't get a steady reading. Hold the device still against the canvas and try again.", 'fail');
+        } else {
+          measureSay('Hold still…');
+        }
+      }, 100) };
+    }).catch(function(err){
+      measureSay(err && err.message === 'DENIED'
+        ? 'Motion access was turned down. Allow motion sensors for this site in your browser settings, then try again.'
+        : "This device doesn't have a tilt sensor the browser can read.", 'fail');
+    });
   });
 
   function onLevelMessage(msg){
