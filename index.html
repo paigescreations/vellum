@@ -58,8 +58,10 @@
     font-family:'Space Mono',ui-monospace,monospace;font-size:0.72rem;padding:5px 12px;border-radius:999px;cursor:pointer;
   }
   .zoom-pill[hidden]{display:none;}
+  /* Size and position are set in real pixels by applyTransform(), not with
+     a CSS scale, so the image is redrawn crisply at every zoom level. */
   .overlay-img{
-    position:absolute;left:50%;top:50%;width:60vw;max-width:640px;height:auto;
+    position:absolute;left:50%;top:50%;height:auto;max-width:none;
     transform-origin:center center;pointer-events:none;
     filter:drop-shadow(0 0 1px rgba(0,0,0,0.4));
   }
@@ -196,8 +198,59 @@
   body.mode-camera .overlay-img, body.mode-camera .grid-layer, body.mode-camera .sample-pill, body.mode-camera footer.dock,
   body.pairing .overlay-img, body.pairing .grid-layer, body.pairing .sample-pill, body.pairing footer.dock{display:none;}
   body.mode-viewer main.stage video, body.mode-camera main.stage video{object-fit:contain;}
-  body.pairing .view{transform:none !important;}
+  body.pairing .view{left:0 !important;top:0 !important;width:100% !important;height:100% !important;}
   body.mode-viewer #cameraRow, body.mode-camera #cameraRow{display:none;}
+
+  /* Fit to canvas (corner pin) */
+  .pin-ui{position:absolute;inset:0;z-index:8;pointer-events:none;}
+  .pin-ui[hidden]{display:none;}
+  .pin-bar{
+    position:absolute;top:10px;left:10px;right:10px;pointer-events:auto;
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between;
+    background:rgba(28,28,31,0.92);border:1px solid var(--line);border-radius:14px;padding:8px 8px 8px 12px;
+    font-size:0.78rem;color:var(--ink-soft);line-height:1.4;
+  }
+  .pin-bar span{flex:1 1 180px;}
+  .pin-bar-btns{display:flex;gap:6px;}
+  .pin-handle{
+    position:absolute;width:48px;height:48px;margin:-24px 0 0 -24px;border-radius:50%;
+    pointer-events:auto;touch-action:none;cursor:grab;
+  }
+  .pin-handle::before{
+    content:"";position:absolute;inset:12px;border-radius:50%;
+    border:3px solid var(--accent);background:rgba(226,163,61,0.25);box-shadow:0 0 0 1px rgba(0,0,0,0.5);
+  }
+  .pin-handle::after{content:"";position:absolute;left:22px;top:22px;width:4px;height:4px;border-radius:50%;background:#fff;}
+  .loupe{
+    position:absolute;width:120px;height:120px;border-radius:50%;pointer-events:none;
+    border:2px solid var(--accent);box-shadow:0 4px 18px rgba(0,0,0,0.5);background:#000;
+  }
+  .loupe[hidden]{display:none;}
+  /* Keep the dock's space (so the camera picture doesn't resize and shift
+     under your fit), just take its buttons away while fitting. */
+  body.pinning footer.dock{visibility:hidden;pointer-events:none;}
+  body.pinning .sample-pill{display:none;}
+
+  /* Level */
+  .level{
+    position:absolute;top:12px;left:12px;z-index:7;width:190px;
+    display:flex;flex-direction:column;gap:6px;
+    background:rgba(28,28,31,0.9);border:1px solid var(--line);border-radius:14px;padding:8px 10px 10px;
+    font-size:0.75rem;color:var(--ink-soft);
+  }
+  .level[hidden]{display:none;}
+  .level-head{display:flex;align-items:center;justify-content:space-between;color:var(--ink);font-weight:600;}
+  .level-x{background:none;border:none;color:var(--ink-soft);font-size:1.1rem;line-height:1;cursor:pointer;padding:0 2px;}
+  .level-track{position:relative;height:16px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);}
+  .level-mid{position:absolute;left:50%;top:2px;bottom:2px;width:2px;margin-left:-1px;background:var(--ink-soft);}
+  .level-bubble{
+    position:absolute;top:2px;left:50%;width:12px;height:10px;margin-left:-6px;border-radius:999px;
+    background:var(--accent);transition:background .2s;
+  }
+  .level.good-roll .level-bubble{background:var(--locked);}
+  .level-read{color:var(--ink);}
+  .level-read.good{color:var(--locked);}
+  body.pinning .level{top:auto;bottom:12px;}
 
   @media (max-width:380px){
     .gate-card h1{font-size:1.7rem;}
@@ -230,6 +283,32 @@
   <img class="overlay-img" id="overlayImg" alt="Reference overlay" />
   </div>
   <button class="zoom-pill" id="zoomPill" hidden></button>
+
+  <div class="pin-ui" id="pinUi" hidden>
+    <div class="pin-bar">
+      <span>Drag each dot onto a corner of your canvas. Two fingers zoom in for precision.</span>
+      <div class="pin-bar-btns">
+        <button class="btn ghost small" id="pinRemove">Remove</button>
+        <button class="btn primary small" id="pinDone">Done</button>
+      </div>
+    </div>
+    <div class="pin-handle" data-i="0"></div>
+    <div class="pin-handle" data-i="1"></div>
+    <div class="pin-handle" data-i="2"></div>
+    <div class="pin-handle" data-i="3"></div>
+    <canvas class="loupe" id="loupe" width="240" height="240" hidden></canvas>
+  </div>
+
+  <div class="level" id="levelBox" hidden>
+    <div class="level-head">
+      <span id="levelTitle">Level</span>
+      <button class="level-x" id="levelClose" aria-label="Close level">&times;</button>
+    </div>
+    <div class="level-track"><span class="level-mid"></span><span class="level-bubble" id="levelBubble"></span></div>
+    <div class="level-read" id="levelRoll">Waiting for the tilt sensor…</div>
+    <div class="level-read" id="levelPitch"></div>
+    <button class="btn ghost small" id="levelMatch">Match canvas angle</button>
+  </div>
   <div class="sample-pill" id="samplePill">Sample sketch — load your own image below</div>
 
   <div class="gate" id="gate">
@@ -267,6 +346,7 @@
   <div class="link-bar" id="linkBar" hidden>
     <span class="dot"></span><span id="linkText"></span>
     <button class="btn ghost small" id="sendBtn" hidden>Send image</button>
+    <button class="btn ghost small" id="levelBtn" hidden>Level</button>
     <button class="btn ghost small" id="dimBtn" hidden>Dim screen</button>
     <button class="btn primary small" id="reconnectBtn" hidden>Reconnect</button>
     <button class="btn ghost small" id="endBtn">End</button>
@@ -327,8 +407,16 @@
         <span>Front camera</span>
         <label class="switch"><input type="checkbox" id="cameraToggle" /><span class="track"></span><span class="knob"></span></label>
       </div>
+      <div class="switch-row">
+        <span id="levelToggleLabel">Level</span>
+        <label class="switch"><input type="checkbox" id="levelToggle" /><span class="track"></span><span class="knob"></span></label>
+      </div>
     </div>
 
+    <div class="sheet-actions">
+      <button class="btn primary" id="pinBtn">Fit to canvas</button>
+      <button class="btn ghost" id="pinClearBtn" hidden>Remove fit</button>
+    </div>
     <div class="sheet-actions">
       <button class="btn ghost" id="resetBtn">Reset position</button>
       <button class="btn ghost" id="fullscreenBtn">Fullscreen</button>
@@ -346,7 +434,9 @@
       <div class="step"><span class="n mono">2</span><span>Drag with one finger to move it, or pinch with two fingers to resize and rotate it against the wall.</span></div>
       <div class="step"><span class="n mono">3</span><span>Once it's lined up, tap <b>Lock</b> so it can't shift while you trace. Tap it again to unlock and reposition.</span></div>
       <div class="step"><span class="n mono">4</span><span>While locked, swipe one finger left for a stronger image, right to fade it out. Pinch with two fingers to zoom in on the view (image and camera together); tap the zoom badge to zoom back out.</span></div>
-      <div class="step"><span class="n mono">5</span><span><b>Adjust</b> has fine opacity and rotation sliders, a mirror flip, a grid, and a camera switch.</span></div>
+      <div class="step"><span class="n mono">5</span><span><b>Adjust</b> has fine opacity and rotation sliders, a mirror flip, a grid, a camera switch, and a level.</span></div>
+      <div class="step"><span class="n mono">✦</span><span><b>Canvas at an angle?</b> In Adjust, tap <b>Fit to canvas</b> and drag the four dots onto your canvas's corners — the image bends to match. You can still move, resize, and turn it afterward. The fit is remembered until you remove it.</span></div>
+      <div class="step"><span class="n mono">✦</span><span><b>Level:</b> the bubble shows sideways tilt; the line below says whether the camera aims too high or low. Canvas leaning back on an easel? Hold the phone flat against it and tap <b>Match canvas angle</b>. With two phones, the viewer shows the tripod's level.</span></div>
       <div class="step"><span class="n mono">6</span><span><b>Two phones:</b> on the tripod phone, tap <b>This is the tripod camera</b>. Scan its code with your other phone, then hold that phone's reply code up to the tripod phone's back camera. No Wi-Fi network needed — turn on one phone's hotspot and join it from the other.</span></div>
       <div class="step"><span class="n mono">7</span><span>Your image lives on the viewer. You can load it there with <b>Image</b>, or tap <b>Send image</b> on the tripod to send one across — the tripod never shows it. If the connection drops, tap <b>Reconnect</b> on both; your image and its position stay put.</span></div>
     </div>
@@ -406,6 +496,22 @@
     pairPreview: document.getElementById('pairPreview'),
     view: document.getElementById('view'),
     zoomPill: document.getElementById('zoomPill'),
+    pinUi: document.getElementById('pinUi'),
+    pinDone: document.getElementById('pinDone'),
+    pinRemove: document.getElementById('pinRemove'),
+    pinHandles: Array.prototype.slice.call(document.querySelectorAll('.pin-handle')),
+    loupe: document.getElementById('loupe'),
+    pinBtn: document.getElementById('pinBtn'),
+    pinClearBtn: document.getElementById('pinClearBtn'),
+    levelBox: document.getElementById('levelBox'),
+    levelTitle: document.getElementById('levelTitle'),
+    levelClose: document.getElementById('levelClose'),
+    levelBubble: document.getElementById('levelBubble'),
+    levelRoll: document.getElementById('levelRoll'),
+    levelPitch: document.getElementById('levelPitch'),
+    levelMatch: document.getElementById('levelMatch'),
+    levelToggle: document.getElementById('levelToggle'),
+    levelBtn: document.getElementById('levelBtn'),
   };
 
   function loadPrefs(){
@@ -428,12 +534,115 @@
 
   function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 
+  // The view's zoom level (two-finger pinch while locked). Declared up here
+  // because the overlay's size depends on it.
+  var view = { z: 1, x: 0, y: 0 };
+
+  // --- Corner pin ("Fit to canvas") ---
+  // When the camera sees the canvas at an angle, the canvas looks like a
+  // slanted four-sided shape, so a rectangular image can't line up. Pinning
+  // the image's four corners (TL, TR, BR, BL) onto the canvas's corners bends
+  // it in perspective to match. Corners are stored as fractions of the
+  // camera picture, so they stay on the canvas through zoom, rotating the
+  // phone, and reconnects. Saved as numbers only -- never the image.
+  var pin = { on: false, editing: false, corners: null };
+  if (prefs.pin && prefs.pin.length === 4) { pin.on = true; pin.corners = prefs.pin; }
+
+  // Where the camera picture is drawn, in unzoomed screen pixels.
+  function videoRect(){
+    var w = els.stage.clientWidth, h = els.stage.clientHeight;
+    var vw = els.video.videoWidth, vh = els.video.videoHeight;
+    if (!vw || !vh) return { x: 0, y: 0, w: w, h: h };
+    var s = getComputedStyle(els.video).objectFit === 'cover'
+      ? Math.max(w / vw, h / vh) : Math.min(w / vw, h / vh);
+    return { x: (w - vw * s) / 2, y: (h - vh * s) / 2, w: vw * s, h: vh * s };
+  }
+  function toStage(c){ var r = videoRect(); return { x: r.x + c[0] * r.w, y: r.y + c[1] * r.h }; }
+  function fromStage(p){ var r = videoRect(); return [(p.x - r.x) / r.w, (p.y - r.y) / r.h]; }
+
+  function rotateAbout(pts, cx, cy, deg, k, dx, dy){
+    var r = deg * Math.PI / 180, cs = Math.cos(r) * k, sn = Math.sin(r) * k;
+    return pts.map(function(p){
+      var x = p.x - cx, y = p.y - cy;
+      return { x: cx + x * cs - y * sn + dx, y: cy + x * sn + y * cs + dy };
+    });
+  }
+  // The pinned corners on screen (unzoomed), with any move/resize/turn
+  // applied on top -- so a fitted image can still be nudged as a whole.
+  function pinnedCorners(){
+    var b = pin.corners.map(toStage);
+    var cx = (b[0].x + b[1].x + b[2].x + b[3].x) / 4, cy = (b[0].y + b[1].y + b[2].y + b[3].y) / 4;
+    return rotateAbout(b, cx, cy, state.rotation, state.scale, state.x, state.y);
+  }
+  // The corners of the plain (unpinned) image as currently shown.
+  function rectCorners(){
+    var img = els.overlayImg;
+    var w = Math.min(window.innerWidth * 0.6, 640) * state.scale;
+    var h = w * ((img.offsetHeight || 1) / (img.offsetWidth || 1));
+    var cx = els.stage.clientWidth / 2, cy = els.stage.clientHeight / 2;
+    var box = [{ x: cx - w / 2, y: cy - h / 2 }, { x: cx + w / 2, y: cy - h / 2 },
+               { x: cx + w / 2, y: cy + h / 2 }, { x: cx - w / 2, y: cy + h / 2 }];
+    return rotateAbout(box, cx, cy, state.rotation, 1, state.x, state.y);
+  }
+
+  // CSS matrix3d that maps a W x H element onto the four points q (TL, TR,
+  // BR, BL): the standard square-to-quad perspective mapping (Heckbert).
+  function quadMatrix(W, H, q){
+    var x0 = q[0].x, y0 = q[0].y, x1 = q[1].x, y1 = q[1].y, x2 = q[2].x, y2 = q[2].y, x3 = q[3].x, y3 = q[3].y;
+    var dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
+    var dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+    var den = dx1 * dy2 - dx2 * dy1;
+    var g = den ? (dx3 * dy2 - dx2 * dy3) / den : 0;
+    var h = den ? (dx1 * dy3 - dx3 * dy1) / den : 0;
+    var a = x1 - x0 + g * x1, b = x3 - x0 + h * x3, d = y1 - y0 + g * y1, e = y3 - y0 + h * y3;
+    return 'matrix3d(' + [a / W, d / W, 0, g / W, b / H, e / H, 0, h / H, 0, 0, 1, 0, x0, y0, 0, 1].join(',') + ')';
+  }
+
+  function isConvex(q){
+    var sign = 0;
+    for (var i = 0; i < 4; i++) {
+      var a = q[i], b = q[(i + 1) % 4], c = q[(i + 2) % 4];
+      var cr = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+      if (Math.abs(cr) < 1e-6) return false;
+      if (sign && (cr > 0) !== (sign > 0)) return false;
+      sign = cr;
+    }
+    return true;
+  }
+
+  // The overlay is sized and placed in real pixels rather than with a CSS
+  // scale(): browsers render a scaled element from a snapshot taken at its
+  // original size (and after a pinch, often stop re-rendering it), which
+  // turns fine lines to mush when zoomed. Real pixels = redrawn sharp.
   function applyTransform(){
-    var m = state.mirrored ? -1 : 1;
-    els.overlayImg.style.transform =
-      'translate(-50%,-50%) translate(' + state.x + 'px,' + state.y + 'px) ' +
-      'rotate(' + state.rotation + 'deg) scale(' + (state.scale * m) + ',' + state.scale + ')';
-    els.overlayImg.style.opacity = String(state.opacity);
+    var z = view.z, img = els.overlayImg;
+    img.style.opacity = String(pin.editing ? Math.max(state.opacity, 0.6) : state.opacity);
+    if (pin.on) {
+      // Lay the element out at about the size it will show, so the warp is
+      // mostly a bend, not a stretch -- that's what keeps it sharp.
+      var q = pinnedCorners().map(function(p){ return { x: p.x * z, y: p.y * z }; });
+      var shown = q;
+      if (state.mirrored) q = [q[1], q[0], q[3], q[2]];
+      var W = Math.max(1, (dist(q[0], q[1]) + dist(q[3], q[2])) / 2);
+      var H = Math.max(1, (dist(q[0], q[3]) + dist(q[1], q[2])) / 2);
+      var cap = Math.min(1, 6000 / Math.max(W, H));
+      W *= cap; H *= cap;
+      img.style.left = img.style.top = '0px';
+      img.style.width = W + 'px';
+      img.style.height = H + 'px';
+      img.style.transformOrigin = '0 0';
+      img.style.transform = quadMatrix(W, H, q);
+      if (pin.editing) placePinHandles(shown);
+      return;
+    }
+    img.style.height = '';
+    img.style.transformOrigin = '';
+    var base = Math.min(window.innerWidth * 0.6, 640);
+    img.style.width = (base * state.scale * z) + 'px';
+    img.style.left = 'calc(50% + ' + (state.x * z) + 'px)';
+    img.style.top = 'calc(50% + ' + (state.y * z) + 'px)';
+    img.style.transform = 'translate(-50%,-50%) rotate(' + state.rotation + 'deg)' +
+      (state.mirrored ? ' scaleX(-1)' : '');
   }
 
   var SAMPLE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 320">' +
@@ -485,12 +694,14 @@
     return 'Could not start the camera (' + (err && err.message ? err.message : 'unknown error') + ').';
   }
 
-  // hd: ask for a sharper picture -- used by the tripod phone, whose video
-  // is what the viewer phone traces from.
+  // hd: ask for the sharpest picture the camera has -- for the tripod and
+  // single-phone mode. (The viewer's quick QR scan doesn't need it.)
   function startCamera(hd){
     els.camErr.hidden = true;
     var specific = { audio: false, video: { facingMode: { ideal: facing } } };
-    if (hd) { specific.video.width = { ideal: 1920 }; specific.video.height = { ideal: 1080 }; }
+    // Ask for up to 4K: zooming in on the viewer can only show as much
+    // detail as the tripod captures. The camera gives its best if it can't.
+    if (hd) { specific.video.width = { ideal: 3840 }; specific.video.height = { ideal: 2160 }; }
 
     return requestStream(specific, 8000).catch(function(err){
       if (err && err.message !== 'TIMEOUT') throw err;
@@ -522,7 +733,9 @@
     if (els.enableCamBtn.disabled) return;
     els.enableCamBtn.disabled = true;
     els.enableCamBtn.textContent = 'Starting…';
-    startCamera().then(function(){
+    // Full resolution here too -- without asking, many Android phones hand
+    // over a 640x480 picture, which goes soft the moment you zoom.
+    startCamera(true).then(function(){
       els.enableCamBtn.disabled = false;
     }).catch(function(){
       els.enableCamBtn.textContent = 'Enable camera';
@@ -570,11 +783,22 @@
   // feed and overlay together, so the tracing lines stay lined up.
   var lockPts = new Map();
   var zoomStart = null;
-  var view = { z: 1, x: 0, y: 0 };
 
+  // Zoom by actually enlarging the view box (not a CSS scale) so the camera
+  // feed is drawn from its full-resolution frames and the overlay is redrawn
+  // sharp -- see applyTransform().
   function applyView(){
-    els.view.style.transform = view.z > 1
-      ? 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.z + ')' : '';
+    var s = els.view.style;
+    if (view.z > 1) {
+      s.left = view.x + 'px';
+      s.top = view.y + 'px';
+      s.width = (els.stage.clientWidth * view.z) + 'px';
+      s.height = (els.stage.clientHeight * view.z) + 'px';
+      s.right = s.bottom = 'auto';
+    } else {
+      s.left = s.top = s.width = s.height = s.right = s.bottom = '';
+    }
+    applyTransform();
     els.zoomPill.hidden = view.z <= 1.01;
     els.zoomPill.textContent = view.z.toFixed(1) + '× · tap to reset';
   }
@@ -632,11 +856,25 @@
     // Same for the two-phone pairing card and status bar buttons, and the
     // tripod phone has no overlay to move at all.
     if (!els.gate.hidden || remote.role === 'camera') return;
-    if (e.target.closest && e.target.closest('.pair, .link-bar, .zoom-pill')) return;
-    if (state.locked) {
+    // Fit-to-canvas mode: a finger on a corner dot drags that corner.
+    var handle = pin.editing && e.target.closest && e.target.closest('.pin-handle');
+    if (handle && !pinDrag) {
+      els.stage.setPointerCapture(e.pointerId);
+      var i = Number(handle.getAttribute('data-i'));
+      var at = stagePoint(e.clientX, e.clientY);
+      var c = screenCorner(i);
+      pinDrag = { id: e.pointerId, i: i, dx: c.x - at.x, dy: c.y - at.y };
+      drawLoupe(c);
+      return;
+    }
+    if (e.target.closest && e.target.closest('.pair, .link-bar, .zoom-pill, .pin-bar, .level')) return;
+    // While fitting, other fingers act like locked mode: two zoom, one does
+    // nothing (no accidental fades while you work the corners).
+    if (state.locked || pin.editing) {
       els.stage.setPointerCapture(e.pointerId);
       lockPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (lockPts.size === 1) {
+        if (pin.editing) return;
         opacitySwipe = { id: e.pointerId, x: e.clientX, opacity: state.opacity };
       } else if (lockPts.size === 2) {
         // A second finger means zoom, not fade: undo any fade the first
@@ -657,6 +895,11 @@
   });
 
   els.stage.addEventListener('pointermove', function(e){
+    if (pinDrag && e.pointerId === pinDrag.id) {
+      var at = stagePoint(e.clientX, e.clientY);
+      movePinCorner(pinDrag.i, { x: at.x + pinDrag.dx, y: at.y + pinDrag.dy });
+      return;
+    }
     if (lockPts.has(e.pointerId)) {
       lockPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (opacitySwipe && e.pointerId === opacitySwipe.id) {
@@ -691,6 +934,11 @@
   });
 
   function endPointer(e){
+    if (pinDrag && e.pointerId === pinDrag.id) {
+      pinDrag = null;
+      els.loupe.hidden = true;
+      return;
+    }
     if (lockPts.has(e.pointerId)) {
       lockPts.delete(e.pointerId);
       if (opacitySwipe && e.pointerId === opacitySwipe.id) {
@@ -710,7 +958,7 @@
 
   els.stage.addEventListener('wheel', function(e){
     e.preventDefault();
-    if (state.locked) {
+    if (state.locked || pin.editing) {
       var p = stagePoint(e.clientX, e.clientY);
       zoomAround(p, p, view, view.z * (e.deltaY < 0 ? 1.1 : 0.9));
       return;
@@ -752,7 +1000,7 @@
 
   els.cameraToggle.addEventListener('change', function(){
     facing = els.cameraToggle.checked ? 'user' : 'environment';
-    startCamera().catch(function(){});
+    startCamera(true).catch(function(){});
   });
 
   els.resetBtn.addEventListener('click', function(){
@@ -768,6 +1016,274 @@
     } catch (e) { /* fullscreen not available in this context -- ignore */ }
   });
   if (!document.fullscreenEnabled) { els.fullscreenBtn.hidden = true; }
+
+  // ---------------------------------------------------------------------
+  // Fit to canvas: editing the corner pin (see pinnedCorners/applyTransform)
+  // ---------------------------------------------------------------------
+  var pinDrag = null;
+
+  // On-screen position of corner i while editing (the move/resize/turn on
+  // top is reset to nothing during editing, so it's just the corner).
+  function screenCorner(i){
+    var p = toStage(pin.corners[i]);
+    return { x: view.x + p.x * view.z, y: view.y + p.y * view.z };
+  }
+  // q: the corners in zoomed view coordinates, TL/TR/BR/BL.
+  function placePinHandles(q){
+    els.pinHandles.forEach(function(h, i){
+      h.style.left = (view.x + q[i].x) + 'px';
+      h.style.top = (view.y + q[i].y) + 'px';
+    });
+  }
+  function movePinCorner(i, sp){
+    drawLoupe(sp);
+    var next = pin.corners.slice();
+    next[i] = fromStage({ x: (sp.x - view.x) / view.z, y: (sp.y - view.y) / view.z });
+    // Don't let a corner cross over another -- the image would turn inside out.
+    if (!isConvex(next.map(toStage))) return;
+    pin.corners = next;
+    applyTransform();
+  }
+
+  // Magnifier above your finger so you can see the exact canvas corner
+  // your fingertip is covering.
+  var loupeCtx = els.loupe.getContext('2d');
+  function drawLoupe(sp){
+    var v = els.video, L = els.loupe, size = L.width, g = loupeCtx;
+    L.hidden = false;
+    L.style.left = (sp.x - 60) + 'px';
+    L.style.top = (sp.y > 170 ? sp.y - 150 : sp.y + 40) + 'px';
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, size, size);
+    if (v.videoWidth) {
+      var r = videoRect(), z = view.z;
+      var u = ((sp.x - view.x) / z - r.x) / r.w, w = ((sp.y - view.y) / z - r.y) / r.h;
+      var mirrored = /scaleX\(-1\)/.test(v.style.transform);
+      if (mirrored) u = 1 - u;
+      // The 120px circle shows 40px of screen around the finger: 3x extra.
+      var src = (40 / (r.w * z)) * v.videoWidth;
+      g.save();
+      if (mirrored) { g.translate(size, 0); g.scale(-1, 1); }
+      try { g.drawImage(v, u * v.videoWidth - src / 2, w * v.videoHeight - src / 2, src, src, 0, 0, size, size); } catch (e) {}
+      g.restore();
+    }
+    var m = size / 2;
+    g.strokeStyle = '#e2a33d'; g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(m, 0); g.lineTo(m, m - 10); g.moveTo(m, m + 10); g.lineTo(m, size);
+    g.moveTo(0, m); g.lineTo(m - 10, m); g.moveTo(m + 10, m); g.lineTo(size, m);
+    g.stroke();
+  }
+
+  function resetSimilarity(){
+    state.x = 0; state.y = 0; state.scale = 1; state.rotation = 0;
+    els.rotationSlider.value = 0; els.rotationVal.textContent = '0°';
+  }
+  function startPinEdit(){
+    closeSheet(els.adjustWrap);
+    // Start from wherever the image is now, so nothing jumps -- unless a
+    // corner is off-screen (or under the instructions bar), in which case
+    // shrink it to fit so every dot can be grabbed.
+    var c = pin.on ? pinnedCorners() : rectCorners();
+    var w = els.stage.clientWidth, h = els.stage.clientHeight, top = 80, pad = 24;
+    var xs = c.map(function(p){ return p.x; }), ys = c.map(function(p){ return p.y; });
+    var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+    var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+    if (minX < pad || maxX > w - pad || minY < top || maxY > h - pad) {
+      var k = Math.min(1, (w - pad * 2) * 0.85 / (maxX - minX), (h - top - pad) * 0.85 / (maxY - minY));
+      var cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+      c = rotateAbout(c, cx, cy, 0, k, w / 2 - cx, (top + h - pad) / 2 - cy);
+    }
+    pin.corners = c.map(fromStage);
+    pin.on = true; pin.editing = true;
+    resetSimilarity();
+    lockPts.clear(); zoomStart = null; opacitySwipe = null;
+    document.body.classList.add('pinning');
+    els.pinUi.hidden = false;
+    applyTransform();
+  }
+  function endPinEdit(){
+    pin.editing = false; pinDrag = null;
+    els.loupe.hidden = true;
+    lockPts.clear(); zoomStart = null;
+    document.body.classList.remove('pinning');
+    els.pinUi.hidden = true;
+  }
+  function savePin(){
+    prefs.pin = pin.on ? pin.corners.map(function(c){ return [+c[0].toFixed(5), +c[1].toFixed(5)]; }) : null;
+    savePrefs(prefs);
+    els.pinClearBtn.hidden = !pin.on;
+    els.pinBtn.textContent = pin.on ? 'Adjust fit' : 'Fit to canvas';
+  }
+  function removePin(){
+    endPinEdit();
+    pin.on = false; pin.corners = null;
+    resetSimilarity();
+    savePin();
+    applyTransform();
+  }
+  els.pinBtn.addEventListener('click', startPinEdit);
+  els.pinClearBtn.addEventListener('click', function(){ closeSheet(els.adjustWrap); removePin(); });
+  els.pinDone.addEventListener('click', function(){ endPinEdit(); savePin(); applyTransform(); });
+  els.pinRemove.addEventListener('click', removePin);
+  // The fit is pinned to the camera picture -- re-place it whenever the
+  // picture's size or shape changes (camera start, resolution change).
+  ['resize', 'loadedmetadata'].forEach(function(ev){
+    els.video.addEventListener(ev, function(){ if (pin.on) applyTransform(); });
+  });
+  savePin();
+
+  // ---------------------------------------------------------------------
+  // Level: is the camera square to the canvas?
+  // Uses the device's tilt sensor. Shows sideways tilt (the bubble) and
+  // whether the camera aims too high or low. "Match canvas angle" measures
+  // a canvas leaning back on an easel -- hold the phone flat against it --
+  // and aims for that instead of straight ahead. With two phones, the
+  // viewer shows the tripod's level and the two share the canvas angle.
+  // ---------------------------------------------------------------------
+  var level = {
+    on: false, send: false, sensing: false, local: null,
+    remote: null, remoteAt: 0, remoteNote: null, lastSend: 0,
+    target: typeof prefs.levelTarget === 'number' ? prefs.levelTarget : 0,
+  };
+
+  function sendPeer(m){
+    if (remote.dc && remote.dc.readyState === 'open') remote.dc.send(JSON.stringify(m));
+  }
+  function screenAngle(){
+    var a = screen.orientation && typeof screen.orientation.angle === 'number'
+      ? screen.orientation.angle : (typeof window.orientation === 'number' ? window.orientation : 0);
+    return ((a % 360) + 360) % 360;
+  }
+
+  function onOrientation(e){
+    if (e.beta == null || e.gamma == null) return;
+    // Which way is "up" (away from the ground), in the device's own axes.
+    var b = e.beta * Math.PI / 180, g = e.gamma * Math.PI / 180;
+    var ux = -Math.sin(g) * Math.cos(b), uy = Math.sin(b), uz = Math.cos(g) * Math.cos(b);
+    // Sideways tilt relative to the screen as it's currently turned.
+    var a = screenAngle() * Math.PI / 180;
+    var roll = Math.atan2(ux * Math.cos(a) - uy * Math.sin(a), ux * Math.sin(a) + uy * Math.cos(a)) * 180 / Math.PI;
+    // How far above/below horizontal the back camera points.
+    var pitch = Math.asin(clamp(-uz, -1, 1)) * 180 / Math.PI;
+    var L = level.local;
+    level.local = L ? { roll: L.roll + (roll - L.roll) * 0.25, pitch: L.pitch + (pitch - L.pitch) * 0.25 }
+                    : { roll: roll, pitch: pitch };
+    if (remote.role === 'camera' && (level.on || level.send) && Date.now() - level.lastSend > 150) {
+      level.lastSend = Date.now();
+      sendPeer({ lvl: [Math.round(level.local.roll * 10) / 10, Math.round(level.local.pitch * 10) / 10] });
+    }
+    if (level.on) renderLevel();
+  }
+
+  // iPhone/iPad Safari asks permission for the tilt sensor, and only from a tap.
+  function startSensing(){
+    if (level.sensing) return Promise.resolve();
+    var D = window.DeviceOrientationEvent;
+    if (!D) return Promise.reject(new Error('NO_SENSOR'));
+    var ask = typeof D.requestPermission === 'function' ? D.requestPermission() : Promise.resolve('granted');
+    return ask.then(function(res){
+      if (res !== 'granted') throw new Error('DENIED');
+      window.addEventListener('deviceorientation', onOrientation);
+      level.sensing = true;
+    });
+  }
+
+  function showingTripod(){ return remote.role === 'viewer' && remote.connected; }
+
+  function renderLevel(){
+    if (!level.on) return;
+    var tripod = showingTripod();
+    els.levelTitle.textContent = tripod ? 'Tripod level' : 'Level';
+    var r = tripod ? level.remote : level.local;
+    if (tripod && (!r || Date.now() - level.remoteAt > 3000)) r = null;
+    els.levelBox.classList.remove('good-roll');
+    els.levelPitch.classList.remove('good');
+    if (!r) {
+      els.levelBubble.style.left = '50%';
+      els.levelRoll.textContent = tripod ? (level.remoteNote || 'Waiting for the tripod…') : 'Waiting for the tilt sensor…';
+      els.levelPitch.textContent = '';
+      return;
+    }
+    var roll = r.roll, aim = r.pitch - level.target;
+    els.levelBubble.style.left = 'calc(50% + ' + clamp(roll * 4, -80, 80) + 'px)';
+    if (Math.abs(roll) < 0.5) {
+      els.levelBox.classList.add('good-roll');
+      els.levelRoll.textContent = 'Level ✓';
+    } else {
+      els.levelRoll.textContent = (roll > 0 ? 'Right' : 'Left') + ' side high by ' + Math.abs(roll).toFixed(1) + '°';
+    }
+    var leanNote = Math.abs(level.target) >= 1
+      ? ' (canvas leans ' + (level.target < 0 ? 'back ' : 'forward ') + Math.abs(level.target).toFixed(0) + '°)' : '';
+    if (Math.abs(aim) < 1) {
+      els.levelPitch.classList.add('good');
+      els.levelPitch.textContent = 'Square to the canvas ✓' + leanNote;
+    } else {
+      els.levelPitch.textContent = 'Aim ' + Math.abs(aim).toFixed(1) + '° ' + (aim > 0 ? 'lower' : 'higher') + leanNote;
+    }
+  }
+  setInterval(function(){ if (level.on && showingTripod()) renderLevel(); }, 1000);
+
+  function levelError(err){
+    els.levelRoll.textContent = err && err.message === 'DENIED'
+      ? 'Motion access was turned down. Allow motion sensors for this site in your browser settings, then try again.'
+      : "This device doesn't have a tilt sensor the browser can read.";
+    els.levelPitch.textContent = '';
+  }
+
+  function setLevelOn(on){
+    level.on = on;
+    els.levelBox.hidden = !on;
+    els.levelToggle.checked = on;
+    els.levelBtn.classList.toggle('primary', on);
+    els.levelBtn.classList.toggle('ghost', !on);
+    if (!on) { if (showingTripod()) sendPeer({ lvl: 'off' }); return; }
+    renderLevel();
+    if (showingTripod()) sendPeer({ lvl: 'on' });
+    else startSensing().then(renderLevel).catch(levelError);
+  }
+  els.levelToggle.addEventListener('change', function(){ setLevelOn(els.levelToggle.checked); });
+  els.levelBtn.addEventListener('click', function(){ setLevelOn(!level.on); });
+  els.levelClose.addEventListener('click', function(){ setLevelOn(false); });
+
+  function setLevelTarget(t, share){
+    level.target = t;
+    prefs.levelTarget = t; savePrefs(prefs);
+    if (share) sendPeer({ lvlTarget: t });
+    renderLevel();
+  }
+  // Uses this device's own sensor, wherever it is -- with two phones, lay
+  // the phone you're holding flat on the canvas; the tripod learns it too.
+  els.levelMatch.addEventListener('click', function(){
+    startSensing().then(function(){
+      els.levelPitch.classList.remove('good');
+      els.levelPitch.textContent = 'Hold this device flat against the canvas…';
+      setTimeout(function(){
+        if (!level.local) { levelError(); return; }
+        setLevelTarget(Math.round(level.local.pitch * 10) / 10, true);
+      }, 900);
+    }).catch(levelError);
+  });
+
+  function onLevelMessage(msg){
+    if (typeof msg.lvlTarget === 'number') setLevelTarget(msg.lvlTarget, false);
+    if (msg.lvl === 'on') {
+      // The viewer wants the tripod's level. Works straight away where the
+      // sensor needs no permission; iPad needs one tap on its Level button.
+      level.send = true;
+      startSensing().catch(function(){ sendPeer({ lvl: 'needs-tap' }); });
+    } else if (msg.lvl === 'off') {
+      level.send = false;
+    } else if (msg.lvl === 'needs-tap') {
+      level.remoteNote = 'Tap Level on the tripod once to turn on its tilt sensor.';
+      renderLevel();
+    } else if (Array.isArray(msg.lvl)) {
+      level.remote = { roll: msg.lvl[0], pitch: msg.lvl[1] };
+      level.remoteAt = Date.now();
+      level.remoteNote = null;
+      renderLevel();
+    }
+  }
 
   // ---------------------------------------------------------------------
   // Two-phone mode: the tripod phone streams its camera straight to the
@@ -915,12 +1431,16 @@
     // Alternate between the whole frame (shrunk) and the middle of the frame
     // at full sharpness -- shrinking a whole HD frame makes a code held in
     // the middle too small to read.
+    // Cycle through the whole frame, a wide middle crop, and a tight middle
+    // crop, so a code held up to a 4K camera still reads at close to full
+    // sharpness.
     var vw = v.videoWidth, vh = v.videoHeight, sx = 0, sy = 0, sw = vw, sh = vh;
-    if (scanFrameNo++ % 2) {
-      sw = sh = Math.round(Math.min(vw, vh) * 0.75);
+    var pass = scanFrameNo++ % 3;
+    if (pass) {
+      sw = sh = Math.round(Math.min(vw, vh) * (pass === 1 ? 0.75 : 0.45));
       sx = Math.round((vw - sw) / 2); sy = Math.round((vh - sh) / 2);
     }
-    var k = Math.min(1, 800 / Math.max(sw, sh));
+    var k = Math.min(1, 900 / Math.max(sw, sh));
     var w = Math.round(sw * k), h = Math.round(sh * k);
     scanCanvas.width = w; scanCanvas.height = h;
     var g = scanCanvas.getContext('2d', { willReadFrequently: true });
@@ -985,6 +1505,7 @@
     els.linkText.textContent = text;
     els.dimBtn.hidden = remote.role !== 'camera' || !!offerReconnect;
     els.sendBtn.hidden = remote.role !== 'camera' || !!offerReconnect;
+    els.levelBtn.hidden = remote.role !== 'camera' || !!offerReconnect;
     els.reconnectBtn.hidden = !offerReconnect;
   }
 
@@ -1112,6 +1633,8 @@
     var pc = remote.pc;
     if (msg.img) {
       onImageMessage(msg);
+    } else if (msg.lvl !== undefined || msg.lvlTarget !== undefined) {
+      onLevelMessage(msg);
     } else if (msg.sdp && msg.sdp.type === 'offer') {
       pc.setRemoteDescription(msg.sdp)
         .then(function(){ return pc.createAnswer(); })
@@ -1134,11 +1657,29 @@
     els.pairPanel.hidden = true;
     if (remote.role === 'viewer') {
       document.body.classList.remove('pairing');
-      setLink('', 'Live from tripod');
+      setLink('', 'Live from tripod' + resolutionLabel());
+      // Share the canvas angle, and pick the tripod's level back up if it
+      // was showing before a reconnect.
+      sendPeer({ lvlTarget: level.target });
+      if (level.on) sendPeer({ lvl: 'on' });
+      renderLevel();
     } else {
       setLink('', 'Streaming to viewer');
     }
   }
+
+  // Show the resolution actually arriving from the tripod, so blurriness
+  // can be told apart: low number = the tripod's picture, high number =
+  // something on this phone.
+  function resolutionLabel(){
+    var v = els.video;
+    return v.videoWidth ? ' · ' + v.videoWidth + '×' + v.videoHeight : '';
+  }
+  els.video.addEventListener('resize', function(){
+    if (remote.role === 'viewer' && remote.connected && /^Live from tripod/.test(els.linkText.textContent)) {
+      els.linkText.textContent = 'Live from tripod' + resolutionLabel();
+    }
+  });
 
   function onLinkState(){
     var s = remote.pc.iceConnectionState;
@@ -1154,13 +1695,19 @@
 
   // Favor a sharp picture over a smooth one -- you're tracing lines, and the
   // phones are right next to each other, so there's bandwidth to spare.
+  // Keep full resolution even if that costs frame rate -- the canvas isn't
+  // moving, and a sharp still picture beats a smooth blurry one for tracing.
+  // Some browsers reject degradationPreference, so retry without it.
   function tuneSender(sender){
-    try {
-      var p = sender.getParameters();
-      if (!p.encodings || !p.encodings.length) return;
-      p.encodings[0].maxBitrate = 6000000;
+    var p;
+    try { p = sender.getParameters(); } catch (e) { return; }
+    if (!p.encodings || !p.encodings.length) return;
+    p.encodings[0].maxBitrate = 25000000;
+    p.encodings[0].scaleResolutionDownBy = 1;
+    var withPref = Object.assign({}, p, { degradationPreference: 'maintain-resolution' });
+    sender.setParameters(withPref).catch(function(){
       sender.setParameters(p).catch(function(){});
-    } catch (e) {}
+    });
   }
 
   // --- Sending the reference image from the tripod to the viewer ---
