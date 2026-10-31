@@ -479,8 +479,8 @@
       <div class="step"><span class="n mono">5</span><span><b>Adjust</b> has fine opacity and rotation sliders, a mirror flip, a grid, a camera switch, and a level.</span></div>
       <div class="step"><span class="n mono">✦</span><span><b>Canvas at an angle?</b> In Adjust, tap <b>Fit to canvas</b> and drag the four dots onto your canvas's corners — the image bends to match. You can still move, resize, and turn it afterward. The fit is remembered until you remove it.</span></div>
       <div class="step"><span class="n mono">✦</span><span><b>Level:</b> the bubble shows sideways tilt; the line below says whether the camera aims too high or low. Canvas leaning back on an easel? Hold the phone flat against it and tap <b>Match canvas angle</b>. With two phones, the viewer shows the tripod's level.</span></div>
-      <div class="step"><span class="n mono">6</span><span><b>Two phones:</b> on the tripod phone, tap <b>This is the tripod camera</b>. Scan its code with your other device and they connect by themselves. If a second code appears, hold it up to the tripod's back camera. Each device just needs internet, from any Wi-Fi or mobile data, and they don't have to be on the same network.</span></div>
-      <div class="step"><span class="n mono">7</span><span>Your image lives on the viewer. You can load it there with <b>Image</b>, or tap <b>Send image</b> on the tripod to send one across — the tripod never shows it. If the connection drops, tap <b>Reconnect</b> on both; your image and its position stay put.</span></div>
+      <div class="step"><span class="n mono">6</span><span><b>Two phones:</b> on the tripod phone, tap <b>This is the tripod camera</b>. Then tap <b>This is my viewer</b> on your other device and scan the code. It connects automatically. Each device just needs internet, from any Wi-Fi or mobile data, and they don't have to be on the same network.</span></div>
+      <div class="step"><span class="n mono">7</span><span>Your image lives on the viewer. You can load it there with <b>Image</b>, or tap <b>Send image</b> on the tripod to send one across — the tripod never shows it. If the connection drops, tap <b>Reconnect</b> on both and scan again; your image and its position stay put.</span></div>
     </div>
   </div>
 </div>
@@ -1676,7 +1676,7 @@
     if (t && t.readyState === 'live' && !t.muted) return;
     startCamera(true).then(function(){
       var nt = currentStream.getVideoTracks()[0];
-      try { nt.contentHint = 'detail'; } catch (e) {}
+      try { nt.contentHint = 'motion'; } catch (e) {}
       if (remote.sender) remote.sender.replaceTrack(nt).catch(function(){});
       if (!els.pairPreviewWrap.hidden) els.pairPreview.srcObject = currentStream;
     }).catch(function(){});
@@ -1797,6 +1797,8 @@
     var pc = remote.pc;
     if (msg.img) {
       onImageMessage(msg);
+    } else if (typeof msg.enc === 'number') {
+      encodeMs = msg.enc;
     } else if (msg.lvl !== undefined || msg.lvlTarget !== undefined) {
       onLevelMessage(msg);
     } else if (msg.sdp && msg.sdp.type === 'offer') {
@@ -1817,6 +1819,7 @@
   function linkUp(){
     remote.connected = true;
     remote.everConnected = true;
+    els.pairPreview.srcObject = null;
     stopScan();
     els.pairPanel.hidden = true;
     if (remote.role === 'viewer') {
@@ -1837,7 +1840,7 @@
   // something on this phone.
   function resolutionLabel(){
     var v = els.video;
-    return v.videoWidth ? ' · ' + v.videoWidth + '×' + v.videoHeight : '';
+    return (v.videoWidth ? ' · ' + v.videoWidth + '×' + v.videoHeight : '') + liveTiming;
   }
   els.video.addEventListener('resize', function(){
     if (remote.role === 'viewer' && remote.connected && /^Live from tripod/.test(els.linkText.textContent)) {
@@ -1863,8 +1866,8 @@
 
   // Favor a sharp picture over a smooth one -- you're tracing lines, and the
   // phones are right next to each other, so there's bandwidth to spare.
-  // Keep full resolution even if that costs frame rate -- the canvas isn't
-  // moving, and a sharp still picture beats a smooth blurry one for tracing.
+  // Keep up with your hand first: if the connection struggles, soften the
+  // picture rather than let frames queue up and lag.
   // Some browsers reject degradationPreference, so retry without it.
   // Over a relay the video crosses the internet (and the relay's monthly
   // allowance), so send a modest 720p-sized picture instead.
@@ -1878,11 +1881,61 @@
     p.encodings[0].maxBitrate = relayed ? 1500000 : 8000000;
     p.encodings[0].maxFramerate = 30;
     p.encodings[0].scaleResolutionDownBy = relayed && shortSide > 720 ? shortSide / 720 : 1;
-    var withPref = Object.assign({}, p, { degradationPreference: 'maintain-resolution' });
+    var withPref = Object.assign({}, p, { degradationPreference: 'maintain-framerate' });
     sender.setParameters(withPref).catch(function(){
       sender.setParameters(p).catch(function(){});
     });
   }
+
+  // Show where the delay goes: route, plus compress + network + buffer +
+  // decode time. Camera and screen time aren't measurable from a web page,
+  // so the real delay is a little longer than this number.
+  var liveTiming = '', encodeMs = 0, lastIn = null;
+  function viewerTiming(){
+    var pc = remote.pc;
+    if (remote.role !== 'viewer' || !remote.connected || !pc) return;
+    pc.getStats().then(function(stats){
+      var types = {}, pair = null, inb = null;
+      stats.forEach(function(r){
+        if (r.type === 'local-candidate' || r.type === 'remote-candidate') types[r.id] = r.candidateType;
+        if (r.type === 'candidate-pair' && r.state === 'succeeded' && (r.nominated || r.selected)) pair = r;
+        if (r.type === 'inbound-rtp' && r.kind === 'video') inb = r;
+      });
+      if (!pair || !inb) return;
+      var prev = lastIn;
+      lastIn = inb;
+      if (!prev) return;
+      var emitted = inb.jitterBufferEmittedCount - prev.jitterBufferEmittedCount;
+      var decoded = inb.framesDecoded - prev.framesDecoded;
+      if (emitted <= 0 || decoded <= 0) return;
+      var buffer = (inb.jitterBufferDelay - prev.jitterBufferDelay) / emitted * 1000;
+      var decode = (inb.totalDecodeTime - prev.totalDecodeTime) / decoded * 1000;
+      var network = (pair.currentRoundTripTime || 0) / 2 * 1000;
+      var relay = types[pair.localCandidateId] === 'relay' || types[pair.remoteCandidateId] === 'relay';
+      liveTiming = ' \u00b7 ' + (relay ? 'relay' : 'direct') + ' \u00b7 ' + Math.round(encodeMs + network + buffer + decode) + ' ms' +
+        ' (' + Math.round(encodeMs) + '/' + Math.round(network) + '/' + Math.round(buffer) + '/' + Math.round(decode) + ')';
+      if (/^Live from tripod/.test(els.linkText.textContent)) {
+        els.linkText.textContent = 'Live from tripod' + resolutionLabel();
+      }
+    }).catch(function(){});
+  }
+  setInterval(viewerTiming, 2000);
+  var lastOut = null;
+  function tripodTiming(){
+    var pc = remote.pc;
+    if (remote.role !== 'camera' || !remote.connected || !pc) return;
+    pc.getStats().then(function(stats){
+      stats.forEach(function(r){
+        if (r.type !== 'outbound-rtp' || r.kind !== 'video') return;
+        var frames = r.framesEncoded - (lastOut ? lastOut.framesEncoded : 0);
+        if (lastOut && frames > 0) {
+          sendPeer({ enc: (r.totalEncodeTime - lastOut.totalEncodeTime) / frames * 1000 });
+        }
+        lastOut = r;
+      });
+    }).catch(function(){});
+  }
+  setInterval(tripodTiming, 2000);
 
   // Watch whether the connection is going through the relay.
   function checkRelay(){
@@ -1989,7 +2042,7 @@
     remote.dc.onopen = function(){
       // Use whatever camera is live right now -- it may have been restarted.
       var track = currentStream.getVideoTracks()[0];
-      try { track.contentHint = 'detail'; } catch (e) {}
+      try { track.contentHint = 'motion'; } catch (e) {}
       remote.sender = pc.addTrack(track, currentStream);
     };
     pc.onnegotiationneeded = function(){
@@ -2013,7 +2066,7 @@
         stopScan();
         try {
           pc.setRemoteDescription(decodeDesc(text.slice(ANSWER_PREFIX.length), 'answer')).catch(failPair);
-          showPair({ title: 'Got it', text: 'Connecting to your viewer…' });
+          showPair({ title: 'Connecting automatically…', text: '' });
           // A connection that can't complete may never report failing, so
           // don't sit on this screen forever.
           setTimeout(function(){
@@ -2025,10 +2078,9 @@
       showPair({
         title: 'Scan this code',
         qr: url,
-        preview: true,
         text: remote.everConnected
-          ? "Tap Reconnect on your viewer too, and point it at this code. They should connect by themselves. If it shows a code instead, hold that up to this phone's back camera."
-          : "Scan this with your other phone's camera app, or open Vellum there and tap \"This is my viewer\". They should connect by themselves. If it shows a code instead, hold that up to this phone's back camera."
+          ? 'Tap Reconnect on your viewer too, then scan this code. It connects automatically.'
+          : 'Open Vellum on your other device, tap "This is my viewer", and scan this code. It connects automatically.'
       });
       // The reply normally arrives over the internet; the camera keeps
       // watching too, for a reply QR when there's no internet (hotspot).
@@ -2066,7 +2118,7 @@
 
   function answerOffer(code){
     stopScan();
-    showPair({ title: 'Connecting', text: 'Making your reply code…' });
+    showPair({ title: 'Connecting automatically…', text: '' });
     loadRelay().then(function(){ if (!els.pairPanel.hidden) answerOfferNow(code); });
   }
   function answerOfferNow(code){
@@ -2103,7 +2155,7 @@
         // or the tripod hasn't connected after a few seconds.
         var pairId = code.split('~')[8];
         if (!pairId) return showReplyCode();
-        showPair({ title: 'Connecting', text: 'Connecting to the tripod automatically…' });
+        showPair({ title: 'Connecting automatically…', text: '' });
         fetch('/api/pair?id=' + pairId, { method: 'POST', body: reply }).then(function(r){
           if (!r.ok) throw new Error('PAIR');
           setTimeout(showReplyCode, 10000);
@@ -2125,11 +2177,11 @@
     showPair({ title: 'Viewer', text: 'Starting the camera to scan…', scan: true });
     startCamera().then(function(){
       showPair({
-        title: 'Step 1 of 2',
+        title: 'Scan the tripod\'s code',
         scan: true,
         text: remote.everConnected
-          ? 'Tap Reconnect on the tripod phone too, then point this phone at its new QR code.'
-          : 'Point this phone at the QR code on the tripod.'
+          ? 'Tap Reconnect on the tripod too, then point this device at its new code.'
+          : 'Point this device at the code on the tripod. It connects automatically.'
       });
       startScan(function(text){
         var code = offerFromText(text);
