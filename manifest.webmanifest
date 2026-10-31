@@ -1,0 +1,14 @@
+{
+  "name": "Vellum",
+  "short_name": "Vellum",
+  "description": "See a reference image over your camera so you can trace it onto a wall or canvas.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#121214",
+  "theme_color": "#121214",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

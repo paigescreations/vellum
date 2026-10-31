@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Vellum</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#121214">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vellum">
 <style>
   :root{
     --bg:#121214;
@@ -356,6 +362,8 @@
           <button class="btn ghost" id="asViewerBtn">This is my viewer</button>
         </div>
       </div>
+      <button class="btn ghost" id="installBtn" hidden>Install Vellum</button>
+      <p id="installHint" hidden>To install: tap Share, then <b>Add to Home Screen</b>.</p>
     </div>
   </div>
 
@@ -1393,6 +1401,26 @@
   // and negotiated over the data channel itself.
   // ---------------------------------------------------------------------
   var ICE_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+  // Relay for networks that block devices from reaching each other (venue
+  // Wi-Fi, mobile data). Video stays encrypted end to end; the relay only
+  // passes it along. If it is unavailable, phones connect directly.
+  var TURN_CREDENTIALS_URL = '/api/turn';
+  var relayLoad = null;
+  // Never hold up pairing for long: with no internet (hotspot only), this
+  // simply times out and the phones connect directly.
+  function loadRelay(){
+    if (!TURN_CREDENTIALS_URL) return Promise.resolve();
+    if (relayLoad) return relayLoad;
+    var timeout = new Promise(function(resolve){ setTimeout(resolve, 4000); });
+    var load = fetch(TURN_CREDENTIALS_URL).then(function(r){
+      if (!r.ok) throw new Error('RELAY');
+      return r.json();
+    }).then(function(servers){
+      ICE_CONFIG = { iceServers: ICE_CONFIG.iceServers.concat(servers) };
+    }).catch(function(){ relayLoad = null; });
+    relayLoad = Promise.race([load, timeout]);
+    return relayLoad;
+  }
   var ANSWER_PREFIX = 'VA~';
   var remote = { role: null, pc: null, dc: null, sender: null, scanToken: null, connected: false };
 
@@ -1420,16 +1448,17 @@
     // Keep the code small enough to scan off a phone screen: a real phone
     // can list many long IPv6 addresses, but two phones on the same
     // hotspot/Wi-Fi only need a local IPv4 address (plus one public one).
-    var ipv4 = [], mdns = [], pub = [];
+    var ipv4 = [], mdns = [], pub = [], relay = [];
     sdp.split(/\r?\n/).forEach(function(line){
-      var m = line.match(/^a=candidate:\S+ 1 udp \d+ (\S+) (\d+) typ (host|srflx)/i);
+      var m = line.match(/^a=candidate:\S+ 1 udp \d+ (\S+) (\d+) typ (host|srflx|relay)/i);
       if (!m || m[1].indexOf(':') >= 0) return;
-      var host = m[3].toLowerCase() === 'host';
-      var c = (host ? 'h' : 's') + ',' + m[1] + ',' + m[2];
-      var list = !host ? pub : /\.local$/i.test(m[1]) ? mdns : ipv4;
+      var kind = m[3].toLowerCase();
+      var host = kind === 'host';
+      var c = kind.charAt(0) + ',' + m[1] + ',' + m[2];
+      var list = kind === 'relay' ? relay : !host ? pub : /\.local$/i.test(m[1]) ? mdns : ipv4;
       if (list.indexOf(c) < 0) list.push(c);
     });
-    var cands = ipv4.slice(0, 2).concat(ipv4.length ? [] : mdns.slice(0, 1), pub.slice(0, 1));
+    var cands = ipv4.slice(0, 2).concat(ipv4.length ? [] : mdns.slice(0, 1), pub.slice(0, 1), relay.slice(0, 2));
     if (!fp || !cands.length) throw new Error('NO_ROUTE');
     return ['1',
       SETUP_CODES[get(/a=setup:(\S+)/)] || 'x',
@@ -1456,9 +1485,10 @@
     ];
     p[7].split(';').forEach(function(c, i){
       var f = c.split(',');
-      var host = f[0] === 'h';
-      lines.push('a=candidate:' + (i + 1) + ' 1 udp ' + ((host ? 2130706431 : 1694498815) - i) + ' ' +
-        f[1] + ' ' + f[2] + ' typ ' + (host ? 'host' : 'srflx raddr 0.0.0.0 rport 0'));
+      var type = { h: 'host', s: 'srflx', r: 'relay' }[f[0]];
+      var pri = { h: 2130706431, s: 1694498815, r: 16777215 }[f[0]];
+      lines.push('a=candidate:' + (i + 1) + ' 1 udp ' + (pri - i) + ' ' + f[1] + ' ' + f[2] + ' typ ' + type +
+        (type === 'host' ? '' : ' raddr 0.0.0.0 rport 0'));
     });
     return { type: type, sdp: lines.join('\r\n') + '\r\n' };
   }
@@ -1468,7 +1498,7 @@
   function gathered(pc){
     return new Promise(function(resolve){
       if (pc.iceGatheringState === 'complete') return resolve();
-      var t = setTimeout(resolve, 3000);
+      var t = setTimeout(resolve, TURN_CREDENTIALS_URL ? 5000 : 3000);
       pc.addEventListener('icegatheringstatechange', function(){
         if (pc.iceGatheringState === 'complete') { clearTimeout(t); resolve(); }
       });
@@ -1795,17 +1825,39 @@
   // Keep full resolution even if that costs frame rate -- the canvas isn't
   // moving, and a sharp still picture beats a smooth blurry one for tracing.
   // Some browsers reject degradationPreference, so retry without it.
+  // Over a relay the video crosses the internet (and the relay's monthly
+  // allowance), so send a modest 720p-sized picture instead.
+  var relayed = false;
   function tuneSender(sender){
     var p;
     try { p = sender.getParameters(); } catch (e) { return; }
     if (!p.encodings || !p.encodings.length) return;
-    p.encodings[0].maxBitrate = 25000000;
-    p.encodings[0].scaleResolutionDownBy = 1;
+    var t = sender.track && sender.track.getSettings ? sender.track.getSettings() : {};
+    var shortSide = Math.min(t.width || 0, t.height || 0);
+    p.encodings[0].maxBitrate = relayed ? 1500000 : 25000000;
+    p.encodings[0].scaleResolutionDownBy = relayed && shortSide > 720 ? shortSide / 720 : 1;
     var withPref = Object.assign({}, p, { degradationPreference: 'maintain-resolution' });
     sender.setParameters(withPref).catch(function(){
       sender.setParameters(p).catch(function(){});
     });
   }
+
+  // Watch whether the connection is going through the relay.
+  function checkRelay(){
+    var pc = remote.pc;
+    if (!pc || !remote.connected || !remote.sender) return;
+    pc.getStats().then(function(stats){
+      var pair = null, types = {};
+      stats.forEach(function(r){
+        if (r.type === 'local-candidate' || r.type === 'remote-candidate') types[r.id] = r.candidateType;
+        if (r.type === 'candidate-pair' && r.state === 'succeeded' && (r.nominated || r.selected)) pair = r;
+      });
+      if (!pair) return;
+      var now = types[pair.localCandidateId] === 'relay' || types[pair.remoteCandidateId] === 'relay';
+      if (now !== relayed) { relayed = now; tuneSender(remote.sender); }
+    }).catch(function(){});
+  }
+  setInterval(checkRelay, 4000);
 
   // --- Sending the reference image from the tripod to the viewer ---
   // Straight down the existing phone-to-phone connection (encrypted, no
@@ -1883,6 +1935,9 @@
   // Reconnect with the camera already going.
   function tripodPair(){
     showPair({ title: 'Tripod camera', text: 'Making the pairing code…' });
+    return loadRelay().then(function(){ if (!els.pairPanel.hidden) tripodPairNow(); });
+  }
+  function tripodPairNow(){
     var pc = newPeer();
     remote.dc.onopen = function(){
       // Use whatever camera is live right now -- it may have been restarted.
@@ -1940,6 +1995,9 @@
   function answerOffer(code){
     stopScan();
     showPair({ title: 'Connecting', text: 'Making your reply code…' });
+    loadRelay().then(function(){ if (!els.pairPanel.hidden) answerOfferNow(code); });
+  }
+  function answerOfferNow(code){
     var pc = newPeer();
     pc.ontrack = function(e){
       els.video.srcObject = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
@@ -1996,6 +2054,29 @@
 
   els.asCameraBtn.addEventListener('click', startTripod);
   els.asViewerBtn.addEventListener('click', startViewer);
+
+  // --- Installing ---
+  // Works offline once installed; Android offers a real install prompt, and
+  // iPhone/iPad do it from Safari's Share menu.
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function(){});
+  var installBtn = document.getElementById('installBtn');
+  var installed = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  var installPrompt = null;
+  window.addEventListener('beforeinstallprompt', function(e){
+    e.preventDefault();
+    installPrompt = e;
+    if (!installed) installBtn.hidden = false;
+  });
+  installBtn.addEventListener('click', function(){
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    installPrompt = null;
+    installBtn.hidden = true;
+  });
+  window.addEventListener('appinstalled', function(){ installBtn.hidden = true; });
+  var isApple = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (isApple && !installed) document.getElementById('installHint').hidden = false;
 
   // Opened by scanning the tripod's code with the phone's own camera app.
   var linkedOffer = location.hash.indexOf('#o=') === 0 ? offerFromText(location.hash) : null;
