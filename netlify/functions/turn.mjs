@@ -11,7 +11,9 @@ export default async (req) => {
   const site = origin || req.headers.get('referer');
   let host = '';
   try { host = new URL(site).host; } catch (e) {}
-  if (!ALLOWED_HOSTS.has(host)) return new Response('Forbidden', { status: 403 });
+  // Same-site requests don't always carry those headers; browsers mark them.
+  const sameSite = req.headers.get('sec-fetch-site') === 'same-origin';
+  if (!sameSite && !ALLOWED_HOSTS.has(host)) return new Response('Forbidden', { status: 403 });
 
   const keyId = process.env.TURN_KEY_ID;
   const token = process.env.TURN_KEY_API_TOKEN;
