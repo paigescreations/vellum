@@ -184,6 +184,8 @@
   .qr{background:#fff;border-radius:10px;line-height:0;overflow:hidden;}
   .qr[hidden]{display:none;}
   .qr canvas{width:min(78vw,50vh,360px);height:auto;image-rendering:pixelated;}
+  /* The reply code is read through a camera, so give it all the room we can. */
+  .qr.big canvas{width:min(86vw,62vh,560px);}
 
   .link-bar{
     position:absolute;left:12px;bottom:12px;z-index:24;display:flex;align-items:center;gap:8px;
@@ -477,7 +479,7 @@
       <div class="step"><span class="n mono">5</span><span><b>Adjust</b> has fine opacity and rotation sliders, a mirror flip, a grid, a camera switch, and a level.</span></div>
       <div class="step"><span class="n mono">✦</span><span><b>Canvas at an angle?</b> In Adjust, tap <b>Fit to canvas</b> and drag the four dots onto your canvas's corners — the image bends to match. You can still move, resize, and turn it afterward. The fit is remembered until you remove it.</span></div>
       <div class="step"><span class="n mono">✦</span><span><b>Level:</b> the bubble shows sideways tilt; the line below says whether the camera aims too high or low. Canvas leaning back on an easel? Hold the phone flat against it and tap <b>Match canvas angle</b>. With two phones, the viewer shows the tripod's level.</span></div>
-      <div class="step"><span class="n mono">6</span><span><b>Two phones:</b> on the tripod phone, tap <b>This is the tripod camera</b>. Scan its code with your other phone, then hold that phone's reply code up to the tripod phone's back camera. Each device just needs internet, from any Wi-Fi or mobile data, and they don't have to be on the same network.</span></div>
+      <div class="step"><span class="n mono">6</span><span><b>Two phones:</b> on the tripod phone, tap <b>This is the tripod camera</b>. Scan its code with your other device and they connect by themselves. If a second code appears, hold it up to the tripod's back camera. Each device just needs internet, from any Wi-Fi or mobile data, and they don't have to be on the same network.</span></div>
       <div class="step"><span class="n mono">7</span><span>Your image lives on the viewer. You can load it there with <b>Image</b>, or tap <b>Send image</b> on the tripod to send one across — the tripod never shows it. If the connection drops, tap <b>Reconnect</b> on both; your image and its position stay put.</span></div>
     </div>
   </div>
@@ -747,6 +749,12 @@
     // Ask for up to 4K: zooming in on the viewer can only show as much
     // detail as the tripod captures. The camera gives its best if it can't.
     if (hd) { specific.video.width = { ideal: 3840 }; specific.video.height = { ideal: 2160 }; }
+    // The tripod has to compress this live, so it sends a steady 1080p: 4K
+    // made the video lag about a second behind your hand.
+    if (remote.role === 'camera') {
+      specific.video.width = { ideal: 1920 }; specific.video.height = { ideal: 1080 };
+      specific.video.frameRate = { ideal: 30, max: 30 };
+    }
 
     return requestStream(specific, 8000).catch(function(err){
       if (err && err.message !== 'TIMEOUT') throw err;
@@ -1462,7 +1470,10 @@
       var list = kind === 'relay' ? relay : !host ? pub : /\.local$/i.test(m[1]) ? mdns : ipv4;
       if (list.indexOf(c) < 0) list.push(c);
     });
-    var cands = ipv4.slice(0, 2).concat(ipv4.length ? [] : mdns.slice(0, 1), pub.slice(0, 1), relay.slice(0, 2));
+    // With a relay available, one local route (for a direct link on shared
+    // Wi-Fi) plus one relay route is enough, and keeps the code easy to scan.
+    var cands = relay.length ? ipv4.slice(0, 1).concat(relay.slice(0, 1))
+      : ipv4.slice(0, 2).concat(ipv4.length ? [] : mdns.slice(0, 1), pub.slice(0, 1));
     diag.mine = routeCounts(cands);
     if (!fp || !cands.length) throw new Error('NO_ROUTE');
     return ['1',
@@ -1575,9 +1586,9 @@
     // crop, so a code held up to a 4K camera still reads at close to full
     // sharpness.
     var vw = v.videoWidth, vh = v.videoHeight, sx = 0, sy = 0, sw = vw, sh = vh;
-    var pass = scanFrameNo++ % 3;
+    var pass = scanFrameNo++ % 4;
     if (pass) {
-      sw = sh = Math.round(Math.min(vw, vh) * (pass === 1 ? 0.75 : 0.45));
+      sw = sh = Math.round(Math.min(vw, vh) * [0, 0.75, 0.45, 0.3][pass]);
       sx = Math.round((vw - sw) / 2); sy = Math.round((vh - sh) / 2);
     }
     var k = Math.min(1, 900 / Math.max(sw, sh));
@@ -1615,6 +1626,7 @@
     els.pairText.textContent = o.text;
     els.pairErr.hidden = true;
     els.pairCancel.textContent = 'Cancel';
+    els.pairQr.classList.toggle('big', !!o.bigQr);
     if (o.qr) { renderQr(o.qr); els.pairQr.hidden = false; }
     else { els.pairQr.hidden = true; els.pairQr.innerHTML = ''; }
     els.pairPreviewWrap.hidden = !o.preview;
@@ -1863,7 +1875,8 @@
     if (!p.encodings || !p.encodings.length) return;
     var t = sender.track && sender.track.getSettings ? sender.track.getSettings() : {};
     var shortSide = Math.min(t.width || 0, t.height || 0);
-    p.encodings[0].maxBitrate = relayed ? 1500000 : 25000000;
+    p.encodings[0].maxBitrate = relayed ? 1500000 : 8000000;
+    p.encodings[0].maxFramerate = 30;
     p.encodings[0].scaleResolutionDownBy = relayed && shortSide > 720 ? shortSide / 720 : 1;
     var withPref = Object.assign({}, p, { degradationPreference: 'maintain-resolution' });
     sender.setParameters(withPref).catch(function(){
@@ -1966,6 +1979,11 @@
     showPair({ title: 'Tripod camera', text: 'Making the pairing code…' });
     return loadRelay().then(function(){ if (!els.pairPanel.hidden) tripodPairNow(); });
   }
+  function randomId(){
+    var b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    return b64urlEncode(Array.prototype.slice.call(b));
+  }
   function tripodPairNow(){
     var pc = newPeer();
     remote.dc.onopen = function(){
@@ -1987,17 +2005,12 @@
       return gathered(pc);
     }).then(function(){
       if (remote.pc !== pc) return;
-      var url = location.origin + location.pathname + '#o=' + encodeDesc(pc.localDescription.sdp);
-      showPair({
-        title: 'Step 1 of 2',
-        qr: url,
-        preview: true,
-        text: remote.everConnected
-          ? "Tap Reconnect on your viewer too, and point it at this code. Then hold the viewer's reply code up to this phone's back camera until it shows up clearly in the small picture below."
-          : "Scan this with your other phone's camera app (or open Vellum there and tap \"This is my viewer\"). It will show a code of its own — hold that up to this phone's back camera until the code shows up clearly in the small picture below."
-      });
-      startScan(function(text){
-        if (text.indexOf(ANSWER_PREFIX) !== 0) return false;
+      var pairId = randomId();
+      var answered = false;
+      function useReply(text){
+        if (answered || remote.pc !== pc) return;
+        answered = true;
+        stopScan();
         try {
           pc.setRemoteDescription(decodeDesc(text.slice(ANSWER_PREFIX.length), 'answer')).catch(failPair);
           showPair({ title: 'Got it', text: 'Connecting to your viewer…' });
@@ -2007,8 +2020,33 @@
             if (remote.pc === pc && !remote.connected) pairFailed();
           }, 35000);
         } catch (err) { failPair(err); }
+      }
+      var url = location.origin + location.pathname + '#o=' + encodeDesc(pc.localDescription.sdp) + '~' + pairId;
+      showPair({
+        title: 'Scan this code',
+        qr: url,
+        preview: true,
+        text: remote.everConnected
+          ? "Tap Reconnect on your viewer too, and point it at this code. They should connect by themselves. If it shows a code instead, hold that up to this phone's back camera."
+          : "Scan this with your other phone's camera app, or open Vellum there and tap \"This is my viewer\". They should connect by themselves. If it shows a code instead, hold that up to this phone's back camera."
+      });
+      // The reply normally arrives over the internet; the camera keeps
+      // watching too, for a reply QR when there's no internet (hotspot).
+      startScan(function(text){
+        if (text.indexOf(ANSWER_PREFIX) !== 0) return false;
+        useReply(text);
         return true;
       });
+      var pollEnd = Date.now() + 5 * 60 * 1000;
+      (function poll(){
+        if (answered || remote.pc !== pc || Date.now() > pollEnd) return;
+        fetch('/api/pair?id=' + pairId).then(function(r){
+          return r.status === 200 ? r.text() : null;
+        }).then(function(text){
+          if (text && text.indexOf(ANSWER_PREFIX) === 0) useReply(text);
+          else setTimeout(poll, 1500);
+        }).catch(function(){ setTimeout(poll, 3000); });
+      })();
     }).catch(failPair);
   }
 
@@ -2034,6 +2072,9 @@
   function answerOfferNow(code){
     var pc = newPeer();
     pc.ontrack = function(e){
+      // Play frames as soon as they arrive rather than buffering them.
+      try { e.receiver.jitterBufferTarget = 0; } catch (err) {}
+      try { e.receiver.playoutDelayHint = 0; } catch (err) {}
       els.video.srcObject = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
       els.video.style.transform = 'none';
       var p = els.video.play();
@@ -2049,11 +2090,24 @@
         var reply = ANSWER_PREFIX + encodeDesc(pc.localDescription.sdp);
         releaseCamera();
         if (remote.connected) return;
-        showPair({
-          title: 'Step 2 of 2',
-          qr: reply,
-          text: "Turn this phone's brightness up, then hold this screen up to the tripod phone's back camera, about a hand's length away and straight on, until it connects. Nothing to tap."
-        });
+        function showReplyCode(){
+          if (remote.pc !== pc || remote.connected) return;
+          showPair({
+            title: 'One more step',
+            qr: reply,
+            bigQr: true,
+            text: "Turn this phone's brightness up, then hold this screen up to the tripod's back camera, about a hand's length away and straight on, until it connects. Nothing to tap."
+          });
+        }
+        // Hand the reply over the internet; show the QR only if that fails
+        // or the tripod hasn't connected after a few seconds.
+        var pairId = code.split('~')[8];
+        if (!pairId) return showReplyCode();
+        showPair({ title: 'Connecting', text: 'Connecting to the tripod automatically…' });
+        fetch('/api/pair?id=' + pairId, { method: 'POST', body: reply }).then(function(r){
+          if (!r.ok) throw new Error('PAIR');
+          setTimeout(showReplyCode, 10000);
+        }).catch(showReplyCode);
       })
       .catch(failPair);
   }
@@ -2075,7 +2129,7 @@
         scan: true,
         text: remote.everConnected
           ? 'Tap Reconnect on the tripod phone too, then point this phone at its new QR code.'
-          : 'Point this phone at the QR code on the tripod phone.'
+          : 'Point this phone at the QR code on the tripod.'
       });
       startScan(function(text){
         var code = offerFromText(text);
