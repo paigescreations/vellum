@@ -222,14 +222,42 @@
   /* Fit to canvas (corner pin) */
   .pin-ui{position:absolute;inset:0;z-index:8;pointer-events:none;}
   .pin-ui[hidden]{display:none;}
+  /* The fitting bar sits at the bottom, next to your thumb, so it never
+     covers the canvas's top corners. It coaches you square as you go. */
   .pin-bar{
-    position:absolute;top:10px;left:10px;right:10px;pointer-events:auto;
-    display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between;
-    background:rgba(28,28,31,0.92);border:1px solid var(--line);border-radius:14px;padding:8px 8px 8px 12px;
+    position:absolute;bottom:10px;left:10px;right:10px;pointer-events:auto;
+    display:flex;flex-direction:column;gap:8px;
+    background:rgba(28,28,31,0.94);border:1px solid var(--line);border-radius:14px;padding:10px;
     font-size:0.78rem;color:var(--ink-soft);line-height:1.4;
   }
-  .pin-bar span{flex:1 1 180px;}
-  .pin-bar-btns{display:flex;gap:6px;}
+  body.mode-viewer .pin-bar{bottom:56px;}
+  /* ...unless the canvas reaches down there and there's room up top. */
+  body.fitbar-top .pin-bar{bottom:auto;top:10px;}
+  body.fitbar-top .level{top:auto;bottom:12px;}
+  body.fitbar-top.mode-viewer .level{bottom:56px;}
+  .pin-coach{display:flex;align-items:center;gap:10px;}
+  .pin-coach-icon{
+    width:34px;height:34px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+    background:var(--panel-2);border:1px solid var(--line);color:var(--ink-soft);
+  }
+  .pin-coach-icon svg{width:20px;height:20px;}
+  .pin-bar[data-tone="adjust"] .pin-coach-icon{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);}
+  .pin-bar[data-tone="square"] .pin-coach-icon{background:var(--locked);border-color:var(--locked);color:#0d2418;}
+  .pin-coach-text{display:flex;flex-direction:column;gap:1px;min-width:0;}
+  .pin-coach-title{color:var(--ink);font-weight:600;font-size:0.9rem;line-height:1.3;}
+  .pin-checks{display:flex;gap:6px;flex-wrap:wrap;}
+  .pin-checks[hidden]{display:none;}
+  .pin-check{
+    display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;
+    background:var(--panel-2);border:1px solid var(--line);font-size:0.7rem;font-weight:600;
+  }
+  .pin-check i{width:7px;height:7px;border-radius:50%;background:var(--accent);}
+  .pin-check.ok{color:var(--ink);}
+  .pin-check.ok i{background:var(--locked);}
+  .pin-bar-btns{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;}
+  .btn.small.on{border-color:var(--accent);color:var(--accent);}
+  .pin-ui.square .pin-handle::before{border-color:var(--locked);background:rgba(76,175,125,0.25);}
+  body.pinning:not(.fitbar-top) .zoom-pill{bottom:auto;top:12px;}
   .pin-handle{
     position:absolute;width:48px;height:48px;margin:-24px 0 0 -24px;border-radius:50%;
     pointer-events:auto;touch-action:none;cursor:grab;
@@ -288,7 +316,28 @@
   .level-link{background:none;border:none;color:var(--accent);font-size:0.75rem;font-weight:600;cursor:pointer;padding:0;}
   .level-read{color:var(--ink);}
   .level-read.good{color:var(--locked);}
-  body.pinning .level{top:auto;bottom:12px;}
+
+  /* Bump alerts */
+  .bump-alert{
+    position:absolute;top:12px;left:12px;right:12px;z-index:30;
+    display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:14px;
+    background:var(--danger);color:#fff;box-shadow:0 10px 30px rgba(0,0,0,0.45);
+  }
+  .bump-alert[hidden]{display:none;}
+  .bump-alert h3{font-family:'Work Sans',sans-serif;font-size:1rem;font-weight:700;}
+  .bump-alert p{margin:0;font-size:0.84rem;line-height:1.45;}
+  .bump-actions{display:flex;gap:8px;}
+  .bump-actions .btn{flex:1;padding:11px 14px;}
+  .btn.on-danger{background:#fff;color:#5a1a10;}
+  .btn.on-danger-ghost{background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.7);}
+  .toast{
+    position:absolute;left:50%;top:48px;transform:translateX(-50%);z-index:29;
+    max-width:calc(100% - 24px);padding:7px 14px;border-radius:999px;
+    background:rgba(28,28,31,0.92);border:1px solid var(--line);color:var(--ink);
+    font-size:0.8rem;line-height:1.35;text-align:center;pointer-events:none;
+  }
+  .toast[hidden]{display:none;}
+  .switch-row span small{display:block;color:var(--ink-soft);font-size:0.74rem;margin-top:2px;}
 
   @media (max-width:380px){
     .gate-card h1{font-size:1.7rem;}
@@ -323,11 +372,23 @@
   <button class="zoom-pill" id="zoomPill" hidden></button>
 
   <div class="pin-ui" id="pinUi" hidden>
-    <div class="pin-bar">
-      <span>Drag each dot onto a corner of your canvas. Two fingers zoom in for precision.</span>
+    <div class="pin-bar" id="pinBar" data-tone="neutral">
+      <div class="pin-coach" aria-live="polite">
+        <span class="pin-coach-icon" id="pinCoachIcon"></span>
+        <span class="pin-coach-text">
+          <span class="pin-coach-title" id="pinCoachTitle">Drag each dot onto a corner of your canvas</span>
+          <span id="pinCoachSub">Two fingers zoom in for precision.</span>
+        </span>
+      </div>
+      <div class="pin-checks" id="pinChecks" hidden>
+        <span class="pin-check" id="chkTilt"><i></i>Tilt</span>
+        <span class="pin-check" id="chkTurn"><i></i>Turn</span>
+        <span class="pin-check" id="chkLevel"><i></i>Level</span>
+      </div>
       <div class="pin-bar-btns">
+        <button class="btn ghost small" id="pinAuto">Auto-find</button>
         <button class="btn ghost small" id="pinRemove">Remove</button>
-        <button class="btn primary small" id="pinDone">Done</button>
+        <button class="btn primary small" id="pinDone">Fix it for me</button>
       </div>
     </div>
     <div class="pin-handle" data-i="0"></div>
@@ -336,6 +397,16 @@
     <div class="pin-handle" data-i="3"></div>
     <canvas class="loupe" id="loupe" width="240" height="240" hidden></canvas>
   </div>
+
+  <div class="bump-alert" id="bumpAlert" role="alert" hidden>
+    <h3 id="bumpTitle">Your phone moved</h3>
+    <p id="bumpText">Your fit may not line up with the canvas anymore.</p>
+    <div class="bump-actions">
+      <button class="btn on-danger" id="resnapBtn">Re-snap to canvas</button>
+      <button class="btn on-danger-ghost" id="bumpDismiss">Dismiss</button>
+    </div>
+  </div>
+  <div class="toast" id="toast" hidden></div>
 
   <div class="level" id="levelBox" hidden>
     <div class="level-head">
@@ -462,6 +533,14 @@
         <span id="levelToggleLabel">Level</span>
         <label class="switch"><input type="checkbox" id="levelToggle" /><span class="track"></span><span class="knob"></span></label>
       </div>
+      <div class="switch-row">
+        <span>Bump alerts<small>Warns you if the camera gets knocked while locked</small></span>
+        <label class="switch"><input type="checkbox" id="bumpToggle" checked /><span class="track"></span><span class="knob"></span></label>
+      </div>
+      <div class="switch-row">
+        <span>Alert sound</span>
+        <label class="switch"><input type="checkbox" id="soundToggle" checked /><span class="track"></span><span class="knob"></span></label>
+      </div>
     </div>
 
     <div class="sheet-actions">
@@ -486,8 +565,9 @@
       <div class="step"><span class="n mono">3</span><span>Once it's lined up, tap <b>Lock</b> so it can't shift while you trace. Tap it again to unlock and reposition.</span></div>
       <div class="step"><span class="n mono">4</span><span>While locked, swipe one finger left for a stronger image, right to fade it out. Pinch with two fingers to zoom in on the view (image and camera together); tap the zoom badge to zoom back out.</span></div>
       <div class="step"><span class="n mono">5</span><span><b>Adjust</b> has fine opacity and rotation sliders, a mirror flip, a grid, a camera switch, and a level.</span></div>
-      <div class="step"><span class="n mono">✦</span><span><b>Canvas at an angle?</b> In Adjust, tap <b>Fit to canvas</b> and drag the four dots onto your canvas's corners — the image bends to match. You can still move, resize, and turn it afterward. The fit is remembered until you remove it.</span></div>
+      <div class="step"><span class="n mono">✦</span><span><b>Fit to canvas:</b> in Adjust, tap <b>Fit to canvas</b>. Vellum finds your canvas, puts the four dots on its corners, and tells you which way to tilt or turn the camera until it's square. Tap <b>Fix it for me</b> and the image bends to match the canvas exactly, even if the camera isn't perfectly square. If it can't find the edges, drag the dots onto the corners yourself. You can still move, resize, and turn the image afterward. The fit is remembered until you remove it.</span></div>
       <div class="step"><span class="n mono">✦</span><span><b>Level:</b> the bubble shows sideways tilt; the line below says whether the camera aims too high or low. Canvas leaning back on an easel? Hold the phone flat against it and tap <b>Match canvas angle</b>. With two phones, the viewer shows the tripod's level.</span></div>
+      <div class="step"><span class="n mono">✦</span><span><b>Bump alerts:</b> while locked, Vellum watches for the camera getting knocked. If it moves, you get a red warning (plus a buzz and a chime on phones). Tap <b>Re-snap to canvas</b> to line your fit back up without starting over. Turn it off in Adjust.</span></div>
       <div class="step"><span class="n mono">6</span><span><b>Two phones:</b> on the tripod phone, tap <b>This is the tripod camera</b>. Then tap <b>This is my viewer</b> on your other device and scan the code. It connects automatically. Each device just needs internet, from any Wi-Fi or mobile data, and they don't have to be on the same network.</span></div>
       <div class="step"><span class="n mono">7</span><span>Your image lives on the viewer. You can load it there with <b>Image</b>, or tap <b>Send image</b> on the tripod to send one across — the tripod never shows it. If the connection drops, tap <b>Reconnect</b> on both and scan again; your image and its position stay put.</span></div>
     </div>
@@ -495,6 +575,7 @@
 </div>
 
 <script src="qrcode.min.js"></script>
+<script src="canvas-find.js"></script>
 <script>
 (function(){
   "use strict";
@@ -836,6 +917,16 @@
     lockPts.clear(); zoomStart = null; opacitySwipe = null;
     els.lockBtn.classList.toggle('locked', state.locked);
     els.lockLabel.textContent = state.locked ? 'Unlock' : 'Lock';
+    if (state.locked) {
+      primeAudio();
+      askMotionPermission();
+      if (!remote.role) keepAwake();
+      startWatch();
+      if (watch.on) toast('Watching for bumps', 2200);
+    } else {
+      stopWatch();
+      if (!remote.role) letSleep();
+    }
   });
 
   var pointers = new Map();
@@ -928,10 +1019,11 @@
       var at = stagePoint(e.clientX, e.clientY);
       var c = screenCorner(i);
       pinDrag = { id: e.pointerId, i: i, dx: c.x - at.x, dy: c.y - at.y };
+      dotTakenOver(i);
       drawLoupe(c);
       return;
     }
-    if (e.target.closest && e.target.closest('.pair, .link-bar, .zoom-pill, .pin-bar, .level')) return;
+    if (e.target.closest && e.target.closest('.pair, .link-bar, .zoom-pill, .pin-bar, .level, .bump-alert')) return;
     // While fitting, other fingers act like locked mode: two zoom, one does
     // nothing (no accidental fades while you work the corners).
     if (state.locked || pin.editing) {
@@ -1152,15 +1244,17 @@
     // Start from wherever the image is now, so nothing jumps -- unless a
     // corner is off-screen (or under the instructions bar), in which case
     // shrink it to fit so every dot can be grabbed.
+    var wasFitted = pin.on;
     var c = pin.on ? pinnedCorners() : rectCorners();
-    var w = els.stage.clientWidth, h = els.stage.clientHeight, top = 80, pad = 24;
+    var w = els.stage.clientWidth, h = els.stage.clientHeight, top = 24, pad = 24;
+    var bottom = remote.role === 'viewer' ? 220 : 170; // the fitting bar
     var xs = c.map(function(p){ return p.x; }), ys = c.map(function(p){ return p.y; });
     var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
     var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
-    if (minX < pad || maxX > w - pad || minY < top || maxY > h - pad) {
-      var k = Math.min(1, (w - pad * 2) * 0.85 / (maxX - minX), (h - top - pad) * 0.85 / (maxY - minY));
+    if (minX < pad || maxX > w - pad || minY < top || maxY > h - bottom) {
+      var k = Math.min(1, (w - pad * 2) * 0.85 / (maxX - minX), (h - top - bottom) * 0.85 / (maxY - minY));
       var cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-      c = rotateAbout(c, cx, cy, 0, k, w / 2 - cx, (top + h - pad) / 2 - cy);
+      c = rotateAbout(c, cx, cy, 0, k, w / 2 - cx, (top + h - bottom) / 2 - cy);
     }
     pin.corners = c.map(fromStage);
     pin.on = true; pin.editing = true;
@@ -1169,13 +1263,17 @@
     document.body.classList.add('pinning');
     els.pinUi.hidden = false;
     applyTransform();
+    stopWatch(true);
+    startFitFinding(!wasFitted);
   }
   function endPinEdit(){
     pin.editing = false; pinDrag = null;
     els.loupe.hidden = true;
     lockPts.clear(); zoomStart = null;
-    document.body.classList.remove('pinning');
+    document.body.classList.remove('pinning', 'fitbar-top');
     els.pinUi.hidden = true;
+    stopFitFinding();
+    if (state.locked) startWatch();
   }
   function savePin(){
     prefs.pin = pin.on ? pin.corners.map(function(c){ return [+c[0].toFixed(5), +c[1].toFixed(5)]; }) : null;
@@ -1200,6 +1298,461 @@
     els.video.addEventListener(ev, function(){ if (pin.on) applyTransform(); });
   });
   savePin();
+
+  // ---------------------------------------------------------------------
+  // Canvas finding: places the Fit to canvas dots for you, coaches the
+  // camera square, and watches for bumps while locked. The edge-finding
+  // lives in canvas-find.js and runs in the background where the browser
+  // allows it, so the camera picture never stutters while it looks.
+  // ---------------------------------------------------------------------
+  var Finder = window.VellumCore || null;
+  var finder = (function(){
+    var worker = null, busy = false, job = null, seq = 0;
+    function runHere(j){
+      setTimeout(function(){
+        var r = null;
+        try { r = Finder.detectCanvas(j.gray, j.w, j.h); } catch (e) {}
+        busy = false; j.cb(r);
+      }, 0);
+    }
+    if (Finder) {
+      try {
+        worker = new Worker('canvas-find.js');
+        worker.onmessage = function(e){
+          if (!job || e.data.id !== job.id) return;
+          var j = job; job = null; busy = false; j.cb(e.data.r);
+        };
+        worker.onerror = function(){
+          worker = null;
+          if (job) { var j = job; job = null; runHere(j); }
+        };
+      } catch (e) { worker = null; }
+    }
+    return {
+      busy: function(){ return busy; },
+      run: function(gray, w, h, cb){
+        if (busy || !Finder) return false;
+        busy = true;
+        var j = { id: ++seq, gray: gray, w: w, h: h, cb: cb };
+        if (worker) {
+          job = j;
+          try { worker.postMessage({ id: j.id, buf: gray.buffer.slice(0), w: w, h: h }); }
+          catch (e) { job = null; runHere(j); }
+        } else runHere(j);
+        return true;
+      }
+    };
+  })();
+
+  // Look for the canvas in the current camera picture. cb gets its four
+  // corners (TL, TR, BR, BL) as fractions of the picture as it's shown --
+  // the same way the fit is stored -- or null.
+  var grabCanvas = document.createElement('canvas');
+  var grabCtx = grabCanvas.getContext('2d', { willReadFrequently: true });
+  function findCanvas(cb){
+    var v = els.video;
+    if (!Finder || !v.videoWidth || v.readyState < 2) return false;
+    var vw = v.videoWidth, vh = v.videoHeight, k = Math.min(1, 320 / Math.max(vw, vh));
+    var pw = Math.max(48, Math.round(vw * k)), ph = Math.max(48, Math.round(vh * k));
+    if (grabCanvas.width !== pw || grabCanvas.height !== ph) { grabCanvas.width = pw; grabCanvas.height = ph; }
+    try { grabCtx.drawImage(v, 0, 0, pw, ph); } catch (e) { return false; }
+    var d = grabCtx.getImageData(0, 0, pw, ph).data, gray = new Uint8Array(pw * ph);
+    for (var i = 0, j = 0; j < gray.length; i += 4, j++) gray[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+    var mirrored = /scaleX\(-1\)/.test(v.style.transform);
+    return finder.run(gray, pw, ph, function(r){
+      if (!r) { cb(null); return; }
+      var q = r.quad.map(function(p){
+        var u = (p.x + 0.5) / pw;
+        return [mirrored ? 1 - u : u, (p.y + 0.5) / ph];
+      });
+      if (mirrored) q = [q[1], q[0], q[3], q[2]];
+      cb({ corners: q, score: r.score });
+    });
+  }
+
+  var toastEl = document.getElementById('toast'), toastTimer = 0;
+  function toast(text, ms){
+    toastEl.textContent = text;
+    toastEl.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.hidden = true; }, ms || 3000);
+  }
+  function buzz(p){ try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+
+  // --- Fitting: auto-placed dots + coaching ---
+  var fitEls = {
+    bar: document.getElementById('pinBar'), icon: document.getElementById('pinCoachIcon'),
+    title: document.getElementById('pinCoachTitle'), sub: document.getElementById('pinCoachSub'),
+    checks: document.getElementById('pinChecks'), auto: document.getElementById('pinAuto'),
+    tilt: document.getElementById('chkTilt'), turn: document.getElementById('chkTurn'), lvl: document.getElementById('chkLevel')
+  };
+  var COACH_ICONS = {
+    search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>',
+    corners: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>',
+    tiltIn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V5"/><path d="M6 10l6-6 6 6"/></svg>',
+    tiltOut: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v15"/><path d="M6 14l6 6 6-6"/></svg>',
+    turnLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H5"/><path d="M10 6l-6 6 6 6"/></svg>',
+    turnRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15"/><path d="M14 6l6 6-6 6"/></svg>',
+    rotCW: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>',
+    rotCCW: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v5h5"/></svg>',
+    back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H4v5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><path d="M4 4l5 5M20 4l-5 5M20 20l-5-5M4 20l5-5"/></svg>',
+    closer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h5V4M20 9h-5V4M20 15h-5v5M4 15h5v5"/></svg>',
+    square: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'
+  };
+  // source: where the dots came from -- 'none' (not on the canvas yet),
+  // 'auto' (found), 'manual' (you placed them).
+  var fitFind = { auto: false, source: 'none', timer: 0, startedAt: 0, lastFound: 0, jumps: 0,
+                  wasSquare: false, dragged: {}, fromAuto: false };
+
+  function startFitFinding(auto){
+    fitFind.auto = !!(auto && Finder);
+    fitFind.source = pin.on && !auto ? 'manual' : 'none';
+    fitFind.fromAuto = !auto; // an existing fit counts as placed
+    fitFind.dragged = {}; fitFind.jumps = 0; fitFind.wasSquare = false;
+    fitFind.startedAt = performance.now(); fitFind.lastFound = 0;
+    fitEls.auto.hidden = !Finder;
+    clearInterval(fitFind.timer);
+    fitFind.timer = setInterval(fitTick, 150);
+    fitTick();
+  }
+  function stopFitFinding(){
+    clearInterval(fitFind.timer);
+    fitFind.timer = 0; fitFind.auto = false;
+  }
+  function fitTick(){
+    if (!pin.editing) { stopFitFinding(); return; }
+    if (fitFind.auto && !pinDrag && !finder.busy()) findCanvas(onFitFound);
+    renderFitCoach();
+  }
+  function onFitFound(r){
+    if (!pin.editing || !fitFind.auto || pinDrag || !r) return;
+    var cur = pin.corners, next;
+    if (fitFind.source !== 'auto') {
+      next = r.corners;
+      buzz(15);
+    } else {
+      // Glide toward small changes so the dots don't jitter; jump only
+      // when the canvas has clearly moved.
+      var a = r.corners.map(toStage), b = cur.map(toStage), far = 0;
+      for (var i = 0; i < 4; i++) far = Math.max(far, dist(a[i], b[i]));
+      var diag = Math.hypot(els.stage.clientWidth, els.stage.clientHeight);
+      if (far < diag * 0.06) {
+        next = cur.map(function(c, i){ return [c[0] + (r.corners[i][0] - c[0]) * 0.45, c[1] + (r.corners[i][1] - c[1]) * 0.45]; });
+        fitFind.jumps = 0;
+      } else if (++fitFind.jumps >= 2) { next = r.corners; fitFind.jumps = 0; }
+      else return;
+    }
+    if (!isConvex(next.map(toStage))) next = r.corners;
+    pin.corners = next;
+    fitFind.source = 'auto';
+    fitFind.lastFound = performance.now();
+    applyTransform();
+  }
+  // You grabbed a dot: stop following the camera and leave the dots to you.
+  function dotTakenOver(i){
+    if (fitFind.source === 'auto') fitFind.fromAuto = true;
+    fitFind.auto = false;
+    fitFind.source = 'manual';
+    fitFind.dragged[i] = true;
+  }
+  fitEls.auto.addEventListener('click', function(){
+    if (fitFind.auto) { fitFind.auto = false; if (fitFind.source === 'none') fitFind.source = 'manual'; }
+    else {
+      fitFind.auto = true; fitFind.source = 'none'; fitFind.dragged = {};
+      fitFind.startedAt = performance.now(); fitFind.jumps = 0;
+    }
+    renderFitCoach();
+  });
+
+  // The bar lives at the bottom, but moves to the top when the canvas's
+  // bottom corners would be under it and there's room above.
+  function placeFitBar(){
+    var q = pin.corners.map(toStage).map(function(p){ return { x: view.x + p.x * view.z, y: view.y + p.y * view.z }; });
+    var sh = els.stage.clientHeight, need = fitEls.bar.offsetHeight + 20;
+    var top = Math.min(q[0].y, q[1].y, q[2].y, q[3].y), bottom = Math.max(q[0].y, q[1].y, q[2].y, q[3].y);
+    var below = sh - (remote.role === 'viewer' ? 46 : 0) - bottom, above = top;
+    var atTop = document.body.classList.contains('fitbar-top'), want = atTop;
+    if (!atTop && below < need && above >= need) want = true;
+    else if (atTop && (below >= need + 30 || (above < need - 10 && below >= need))) want = false;
+    if (want !== atTop) document.body.classList.toggle('fitbar-top', want);
+  }
+
+  function renderFitCoach(){
+    if (!pin.editing) return;
+    var phone = remote.role === 'viewer' ? 'the tripod phone' : 'your phone';
+    var tone = 'neutral', icon = 'corners', checks = null;
+    var title = 'Drag each dot onto a corner of your canvas';
+    var sub = 'Two fingers zoom in for precision. Then tap Fix it for me.';
+    var placed = fitFind.source === 'auto' ||
+      (fitFind.source === 'manual' && (fitFind.fromAuto || Object.keys(fitFind.dragged).length >= 4));
+    if (fitFind.auto && fitFind.source === 'none') {
+      if (performance.now() - fitFind.startedAt < 1800) {
+        icon = 'search'; title = 'Looking for your canvas…'; sub = 'Point the camera so the whole canvas is on screen.';
+      } else {
+        title = "Can't find the canvas edges";
+        sub = 'Drag each dot onto a corner of your canvas, or move so the whole canvas is on screen.';
+      }
+    } else if (placed && Finder) {
+      var q = pin.corners.map(toStage);
+      var c = Finder.coach(q, els.stage.clientWidth, els.stage.clientHeight);
+      if (c.key === 'square') {
+        tone = 'square'; icon = 'square'; title = 'Square to the canvas';
+        sub = 'Tap Fix it for me to fit your image to it.';
+        checks = c.ok;
+        if (!fitFind.wasSquare) buzz(25);
+      } else {
+        tone = 'adjust'; icon = c.key; title = c.text.replace(/your phone/g, phone);
+        var fixable = c.key !== 'back' && c.key !== 'closer';
+        sub = fixable ? 'Or skip it and tap Fix it for me. The image bends to match.'
+                      : 'Or place the dots yourself and tap Fix it for me.';
+        if (fixable) checks = c.ok;
+      }
+      fitFind.wasSquare = c.key === 'square';
+      if (fitFind.auto && performance.now() - fitFind.lastFound > 1500) {
+        sub = 'Lost sight of the edges. Hold steady, or drag the dots yourself.';
+      }
+    }
+    placeFitBar();
+    fitEls.bar.dataset.tone = tone;
+    if (fitEls.icon.dataset.k !== icon) { fitEls.icon.innerHTML = COACH_ICONS[icon] || COACH_ICONS.corners; fitEls.icon.dataset.k = icon; }
+    if (fitEls.title.textContent !== title) fitEls.title.textContent = title;
+    if (fitEls.sub.textContent !== sub) fitEls.sub.textContent = sub;
+    fitEls.checks.hidden = !checks;
+    if (checks) {
+      fitEls.tilt.classList.toggle('ok', checks.tilt);
+      fitEls.turn.classList.toggle('ok', checks.turn);
+      fitEls.lvl.classList.toggle('ok', checks.level);
+    }
+    fitEls.auto.classList.toggle('on', fitFind.auto);
+    els.pinUi.classList.toggle('square', tone === 'square');
+  }
+
+  // --- Bump alerts ---
+  // While locked, two things watch for the camera being knocked:
+  //  1. the camera itself: every second or so, find the canvas again and
+  //     check it's still where it was (all four corners have to move, so a
+  //     hand or brush in front of one corner won't set it off);
+  //  2. the motion sensors of the phone holding the camera -- with two
+  //     devices, the tripod phone feels the knock and tells the viewer.
+  if (typeof prefs.bumpAlerts !== 'boolean') prefs.bumpAlerts = true;
+  if (typeof prefs.alertSound !== 'boolean') prefs.alertSound = true;
+  var bumpEls = {
+    box: document.getElementById('bumpAlert'), title: document.getElementById('bumpTitle'),
+    text: document.getElementById('bumpText'), resnap: document.getElementById('resnapBtn'),
+    dismiss: document.getElementById('bumpDismiss'),
+    toggle: document.getElementById('bumpToggle'), sound: document.getElementById('soundToggle')
+  };
+  bumpEls.toggle.checked = prefs.bumpAlerts;
+  bumpEls.sound.checked = prefs.alertSound;
+
+  var TILT_LIMIT = 0.5;  // degrees the camera can tip before it counts as moved
+  var TURN_LIMIT = 0.8;  // degrees of turn in any direction
+  var HOLD_MS = 400;     // a change has to last this long (ignores a passing wobble)
+  var watch = { on: false, alerted: false, ref: null, streak: 0, timer: 0,
+                sensing: false, reported: false, start: 0, g: null, g0: null,
+                rot: { a: 0, b: 0, c: 0 }, lastT: 0, tiltSince: 0, turnSince: 0 };
+
+  function canWatch(){
+    if (!state.locked || !prefs.bumpAlerts || pin.editing || !els.video.srcObject) return false;
+    return remote.role === 'viewer' ? remote.connected : !remote.role;
+  }
+  function startWatch(){
+    stopWatch(true);
+    if (!canWatch()) return;
+    watch.on = true; watch.alerted = false; watch.ref = null; watch.streak = 0;
+    watch.timer = setInterval(cameraCheck, 1200);
+    if (remote.role === 'viewer') sendPeer({ bump: 'on' });
+    else listenMotion(true);
+  }
+  function stopWatch(quiet){
+    var was = watch.on;
+    watch.on = false; watch.alerted = false;
+    clearInterval(watch.timer); watch.timer = 0;
+    listenMotion(false);
+    if (was && remote.role === 'viewer') sendPeer({ bump: 'off' });
+    if (!quiet) hideBump();
+  }
+
+  function cameraCheck(){
+    if (!watch.on || watch.alerted || document.visibilityState !== 'visible' || finder.busy()) return;
+    findCanvas(function(r){
+      if (!watch.on || watch.alerted) return;
+      if (!r) { watch.streak = 0; return; }
+      if (!watch.ref) { watch.ref = r.corners; return; }
+      var a = watch.ref.map(toStage), b = r.corners.map(toStage);
+      var ratio = Finder.polyArea(b) / Math.max(1, Finder.polyArea(a));
+      if (ratio < 0.8 || ratio > 1.25) { watch.streak = 0; return; } // probably not the canvas
+      var shift = Finder.quadShift(a, b, Math.hypot(els.stage.clientWidth, els.stage.clientHeight));
+      if (shift.min > 0.01) { if (++watch.streak >= 2) raiseBump(); }
+      else watch.streak = 0;
+    });
+  }
+
+  function resetMotion(){
+    watch.start = performance.now(); watch.g = null; watch.g0 = null;
+    watch.rot = { a: 0, b: 0, c: 0 }; watch.lastT = 0; watch.tiltSince = 0; watch.turnSince = 0;
+    watch.reported = false;
+  }
+  function listenMotion(on){
+    if (on) resetMotion();
+    if (on === watch.sensing) return;
+    watch.sensing = on;
+    if (on) window.addEventListener('devicemotion', onMotion);
+    else window.removeEventListener('devicemotion', onMotion);
+  }
+  function askMotionPermission(){
+    try {
+      var D = window.DeviceMotionEvent;
+      if (D && typeof D.requestPermission === 'function') D.requestPermission().catch(function(){});
+    } catch (e) {}
+  }
+  function onMotion(e){
+    if (!watch.sensing) return;
+    var t = performance.now(), dt = watch.lastT ? Math.min(0.1, (t - watch.lastT) / 1000) : 0;
+    watch.lastT = t;
+    var settled = t - watch.start > 1200;
+    var moved = false;
+    var a = e.accelerationIncludingGravity;
+    if (a && a.x != null && a.y != null && a.z != null) {
+      var g = watch.g;
+      if (!g) watch.g = { x: a.x, y: a.y, z: a.z };
+      else { g.x += (a.x - g.x) * 0.12; g.y += (a.y - g.y) * 0.12; g.z += (a.z - g.z) * 0.12; }
+      if (!settled) watch.g0 = { x: watch.g.x, y: watch.g.y, z: watch.g.z };
+      else if (watch.g0) {
+        var p = watch.g, q = watch.g0;
+        var dot = p.x * q.x + p.y * q.y + p.z * q.z;
+        var n = Math.sqrt((p.x * p.x + p.y * p.y + p.z * p.z) * (q.x * q.x + q.y * q.y + q.z * q.z)) || 1;
+        var tilt = Math.acos(clamp(dot / n, -1, 1)) * 180 / Math.PI;
+        if (tilt > TILT_LIMIT) { if (!watch.tiltSince) watch.tiltSince = t; else if (t - watch.tiltSince > HOLD_MS) moved = true; }
+        else watch.tiltSince = 0;
+      }
+    }
+    var r = e.rotationRate;
+    if (r && r.alpha != null && dt) {
+      // Add up how far it has turned, slowly forgetting so sensor drift
+      // can't build up into a false alarm.
+      var leak = Math.exp(-dt / 20);
+      watch.rot.a = (watch.rot.a + r.alpha * dt) * leak;
+      watch.rot.b = (watch.rot.b + (r.beta || 0) * dt) * leak;
+      watch.rot.c = (watch.rot.c + (r.gamma || 0) * dt) * leak;
+      if (!settled) watch.rot = { a: 0, b: 0, c: 0 };
+      else {
+        var turned = Math.sqrt(watch.rot.a * watch.rot.a + watch.rot.b * watch.rot.b + watch.rot.c * watch.rot.c);
+        if (turned > TURN_LIMIT) { if (!watch.turnSince) watch.turnSince = t; else if (t - watch.turnSince > HOLD_MS) moved = true; }
+        else watch.turnSince = 0;
+      }
+    }
+    if (!moved) return;
+    if (remote.role === 'camera') {
+      if (!watch.reported) { watch.reported = true; sendPeer({ bump: 'moved' }); }
+    } else raiseBump();
+  }
+
+  // Tripod and viewer talking about bumps.
+  function onBumpMessage(msg){
+    if (remote.role === 'camera') {
+      if (msg.bump === 'on') listenMotion(true);
+      else if (msg.bump === 'off') listenMotion(false);
+    } else if (msg.bump === 'moved') {
+      raiseBump();
+    }
+  }
+
+  var audioCtx = null;
+  function primeAudio(){
+    try {
+      if (!audioCtx) { var AC = window.AudioContext || window.webkitAudioContext; if (AC) audioCtx = new AC(); }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {}
+  }
+  function chime(){
+    if (!prefs.alertSound || !audioCtx) return;
+    try {
+      var t = audioCtx.currentTime;
+      [[880, 0], [659, 0.2], [880, 0.4]].forEach(function(nt){
+        var o = audioCtx.createOscillator(), gn = audioCtx.createGain();
+        o.type = 'sine'; o.frequency.value = nt[0];
+        gn.gain.setValueAtTime(0.0001, t + nt[1]);
+        gn.gain.exponentialRampToValueAtTime(0.35, t + nt[1] + 0.02);
+        gn.gain.exponentialRampToValueAtTime(0.0001, t + nt[1] + 0.18);
+        o.connect(gn); gn.connect(audioCtx.destination);
+        o.start(t + nt[1]); o.stop(t + nt[1] + 0.2);
+      });
+    } catch (e) {}
+  }
+
+  function raiseBump(){
+    if (!watch.on || watch.alerted) return;
+    watch.alerted = true;
+    var canSnap = pin.on && !!Finder;
+    bumpEls.title.textContent = remote.role === 'viewer' ? 'The tripod moved' : 'Your phone moved';
+    bumpEls.text.textContent = canSnap
+      ? 'Your fit may not line up with the canvas anymore. Re-snap lines it back up and keeps your image where you had it.'
+      : 'Check that your image still lines up before you keep going.';
+    bumpEls.resnap.hidden = !canSnap;
+    bumpEls.dismiss.textContent = canSnap ? 'Dismiss' : 'Got it';
+    bumpEls.box.hidden = false;
+    buzz([260, 120, 260, 120, 260]);
+    chime();
+  }
+  function hideBump(){ bumpEls.box.hidden = true; }
+  // Keep watching from wherever the camera is now.
+  function rearmWatch(){
+    hideBump();
+    watch.alerted = false; watch.ref = null; watch.streak = 0;
+    if (remote.role === 'viewer') sendPeer({ bump: 'on' });
+    else resetMotion();
+  }
+  bumpEls.dismiss.addEventListener('click', rearmWatch);
+
+  // Re-snap: find the canvas again and move the fit by exactly as much as
+  // the canvas moved in the picture, so your dots and any nudges carry over.
+  bumpEls.resnap.addEventListener('click', function(){
+    if (!pin.on || !Finder) return;
+    var ref = watch.ref, tries = 0, best = null;
+    hideBump();
+    bumpEls.resnap.disabled = true;
+    toast('Finding your canvas…', 2500);
+    (function attempt(){
+      var started = findCanvas(function(r){
+        if (r && (!best || r.score > best.score)) best = r;
+        if (++tries < 5 && !(best && tries >= 2)) setTimeout(attempt, 150);
+        else finish();
+      });
+      if (!started) { if (++tries < 8) setTimeout(attempt, 200); else finish(); }
+    })();
+    function pt(c){ return { x: c[0], y: c[1] }; }
+    function finish(){
+      bumpEls.resnap.disabled = false;
+      if (!best) {
+        rearmWatch();
+        startPinEdit();
+        toast("Couldn't find the canvas edges. Drag the dots onto it, then tap Fix it for me.", 4500);
+        return;
+      }
+      var H = ref ? Finder.solveHomography(ref.map(pt), best.corners.map(pt)) : null;
+      var moved = H ? pin.corners.map(function(c){ var p = Finder.applyH(H, c[0], c[1]); return [p.x, p.y]; }) : best.corners;
+      pin.corners = isConvex(moved.map(toStage)) ? moved : best.corners;
+      savePin();
+      applyTransform();
+      rearmWatch();
+      toast('Lined back up with your canvas', 2500);
+    }
+  });
+
+  bumpEls.toggle.addEventListener('change', function(){
+    prefs.bumpAlerts = bumpEls.toggle.checked; savePrefs(prefs);
+    if (prefs.bumpAlerts && state.locked) startWatch();
+    else if (!prefs.bumpAlerts) stopWatch();
+  });
+  bumpEls.sound.addEventListener('change', function(){
+    prefs.alertSound = bumpEls.sound.checked; savePrefs(prefs);
+    if (prefs.alertSound) primeAudio();
+  });
+
+  function letSleep(){
+    if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
+  }
 
   // ---------------------------------------------------------------------
   // Level: is the camera square to the canvas?
@@ -1753,6 +2306,7 @@
     if (!remote.role) {
       // One phone: the OS switches the camera off while you're away.
       if (currentStream) setTimeout(function(){ playVideo(); reviveCamera(); }, 600);
+      if (state.locked) keepAwake();
       return;
     }
     keepAwake();
@@ -1882,6 +2436,8 @@
       encodeMs = msg.enc;
     } else if (msg.lvl !== undefined || msg.lvlTarget !== undefined) {
       onLevelMessage(msg);
+    } else if (msg.bump !== undefined) {
+      onBumpMessage(msg);
     } else if (msg.sdp && msg.sdp.type === 'offer') {
       pc.setRemoteDescription(msg.sdp)
         .then(function(){ return pc.createAnswer(); })
@@ -1911,6 +2467,8 @@
       sendPeer({ lvlTarget: level.target });
       if (level.on) sendPeer({ lvl: 'on' });
       renderLevel();
+      if (watch.on) sendPeer({ bump: 'on' });
+      else if (state.locked) startWatch();
     } else {
       setLink('', 'Streaming to viewer');
     }
