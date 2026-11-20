@@ -775,9 +775,11 @@
       if (currentStream) currentStream.getTracks().forEach(function(t){ t.stop(); });
       currentStream = stream;
       els.video.srcObject = stream;
-      // On the tripod, if something takes the camera away while the page is
-      // still showing (e.g. the photo picker for Send image), take it back.
-      if (remote.role === 'camera') {
+      lastFrameAt = performance.now();
+      // On the tripod (or a single phone), if something takes the camera
+      // away while the page is still showing (e.g. the photo picker for
+      // Send image), take it back.
+      if (remote.role === 'camera' || !remote.role) {
         stream.getVideoTracks()[0].addEventListener('ended', function(){
           if (document.visibilityState === 'visible') setTimeout(reviveCamera, 800);
         });
@@ -1684,30 +1686,81 @@
   // switch the tripod's camera off and pause the page. On the way back,
   // restart the camera and slip it into the existing connection -- if the
   // connection itself survived the trip, nothing needs re-pairing.
-  function reviveCamera(){
+  // force: restart even if the camera claims to be fine -- for when the
+  // picture has visibly stopped updating.
+  var reviving = false, reviveFails = 0;
+  function reviveCamera(force){
+    if (reviving || remote.role === 'viewer') return;
     var t = currentStream && currentStream.getVideoTracks()[0];
-    if (t && t.readyState === 'live' && !t.muted) return;
+    if (!force && t && t.readyState === 'live' && !t.muted) return;
+    // Let go of a stuck camera first; many phones won't open it twice.
+    if (force && currentStream) currentStream.getTracks().forEach(function(tr){ tr.stop(); });
+    reviving = true;
     startCamera(true).then(function(){
+      reviveFails = 0;
       var nt = currentStream.getVideoTracks()[0];
       try { nt.contentHint = 'motion'; } catch (e) {}
       if (remote.sender) remote.sender.replaceTrack(nt).catch(function(){});
       if (!els.pairPreviewWrap.hidden) els.pairPreview.srcObject = currentStream;
-    }).catch(function(){});
+    }).catch(function(){
+      // One phone: after a few failed tries, show the camera button again
+      // so it can be started by hand.
+      if (++reviveFails >= 3 && !remote.role) { els.gate.hidden = false; reviveFails = 0; }
+    }).then(function(){ reviving = false; });
   }
+  function playVideo(){
+    if (!els.video.srcObject) return;
+    var p = els.video.play();
+    if (p && p.catch) p.catch(function(){});
+  }
+
+  // Frozen-picture watchdog. The OS sometimes hands the camera back after
+  // you switch apps without sending any new frames, so the picture sticks
+  // on the last frame. If nothing new arrives for a few seconds while
+  // Vellum is on screen, restart the camera (or, on the viewer, nudge the
+  // video to play).
+  var lastFrameAt = 0, watchdogNext = 0;
+  (function watchFrames(){
+    var v = els.video;
+    if (v.requestVideoFrameCallback) {
+      var onFrame = function(){ lastFrameAt = performance.now(); v.requestVideoFrameCallback(onFrame); };
+      v.requestVideoFrameCallback(onFrame);
+    } else {
+      var lastTime = -1;
+      setInterval(function(){
+        if (v.currentTime !== lastTime) { lastTime = v.currentTime; lastFrameAt = performance.now(); }
+      }, 250);
+    }
+    setInterval(function(){
+      if (document.visibilityState !== 'visible' || !v.srcObject || !els.gate.hidden) return;
+      var now = performance.now();
+      if (now - lastFrameAt < 2500 || now < watchdogNext) return;
+      watchdogNext = now + 6000;
+      playVideo();
+      if (remote.role !== 'viewer') reviveCamera(true);
+    }, 1000);
+  })();
   function cameraReady(){
     var t = currentStream && currentStream.getVideoTracks()[0];
     return t && t.readyState === 'live' ? Promise.resolve() : startCamera(true);
   }
 
   document.addEventListener('visibilitychange', function(){
-    if (!remote.role || document.visibilityState !== 'visible') return;
+    if (document.visibilityState !== 'visible') return;
+    // Coming back from another app: give the camera a moment before the
+    // frozen-picture watchdog judges it.
+    lastFrameAt = performance.now();
+    if (!remote.role) {
+      // One phone: the OS switches the camera off while you're away.
+      if (currentStream) setTimeout(function(){ playVideo(); reviveCamera(); }, 600);
+      return;
+    }
     keepAwake();
     if (remote.role === 'camera') {
       // Give the OS a moment to hand the camera back on its own first.
       setTimeout(reviveCamera, 1200);
-    } else if (els.video.srcObject) {
-      var p = els.video.play();
-      if (p && p.catch) p.catch(function(){});
+    } else {
+      playVideo();
     }
   });
 
@@ -1789,6 +1842,7 @@
   function newPeer(){
     var pc = new RTCPeerConnection(ICE_CONFIG);
     var dc = pc.createDataChannel('vellum', { negotiated: true, id: 0 });
+    encodeSlow = false; slowReadings = 0; // each connection starts at full size
     remote.pc = pc; remote.dc = dc;
     dc.binaryType = 'arraybuffer';
     dc.onmessage = onPeerMessage;
@@ -1796,9 +1850,23 @@
     // paired" signal: ICE on the viewer can report connected before the
     // tripod has even scanned the reply code.
     dc.addEventListener('open', linkUp);
+    // The pairing code only has room for a route or two, so the devices may
+    // first connect the slow way (through the relay). Once connected, share
+    // every route this device found -- same Wi-Fi, other networks, public
+    // address -- so the connection can switch to the fastest direct path,
+    // and has a spare route if one drops.
+    var earlyRoutes = [];
     pc.onicecandidate = function(e){
-      if (e.candidate && dc.readyState === 'open') dc.send(JSON.stringify({ candidate: e.candidate }));
+      if (!e.candidate) return;
+      if (dc.readyState === 'open') dc.send(JSON.stringify({ candidate: e.candidate }));
+      else earlyRoutes.push(e.candidate);
     };
+    dc.addEventListener('open', function(){
+      earlyRoutes.forEach(function(c){
+        try { dc.send(JSON.stringify({ candidate: c })); } catch (err) {}
+      });
+      earlyRoutes = [];
+    });
     pc.oniceconnectionstatechange = onLinkState;
     return pc;
   }
@@ -1884,16 +1952,20 @@
   // Some browsers reject degradationPreference, so retry without it.
   // Over a relay the video crosses the internet (and the relay's monthly
   // allowance), so send a modest 720p-sized picture instead.
-  var relayed = false;
+  // encodeSlow: the tripod can't compress full size fast enough (usually a
+  // phone getting warm during a long session), so send 720p rather than
+  // let frames queue up behind your hand.
+  var relayed = false, encodeSlow = false;
   function tuneSender(sender){
     var p;
     try { p = sender.getParameters(); } catch (e) { return; }
     if (!p.encodings || !p.encodings.length) return;
     var t = sender.track && sender.track.getSettings ? sender.track.getSettings() : {};
     var shortSide = Math.min(t.width || 0, t.height || 0);
-    p.encodings[0].maxBitrate = relayed ? 1500000 : 8000000;
+    var small = relayed || encodeSlow;
+    p.encodings[0].maxBitrate = relayed ? 1500000 : encodeSlow ? 4000000 : 8000000;
     p.encodings[0].maxFramerate = 30;
-    p.encodings[0].scaleResolutionDownBy = relayed && shortSide > 720 ? shortSide / 720 : 1;
+    p.encodings[0].scaleResolutionDownBy = small && shortSide > 720 ? shortSide / 720 : 1;
     var withPref = Object.assign({}, p, { degradationPreference: 'maintain-framerate' });
     sender.setParameters(withPref).catch(function(){
       sender.setParameters(p).catch(function(){});
@@ -1933,7 +2005,7 @@
     }).catch(function(){});
   }
   setInterval(viewerTiming, 2000);
-  var lastOut = null;
+  var lastOut = null, slowReadings = 0;
   function tripodTiming(){
     var pc = remote.pc;
     if (remote.role !== 'camera' || !remote.connected || !pc) return;
@@ -1942,7 +2014,13 @@
         if (r.type !== 'outbound-rtp' || r.kind !== 'video') return;
         var frames = r.framesEncoded - (lastOut ? lastOut.framesEncoded : 0);
         if (lastOut && frames > 0) {
-          sendPeer({ enc: (r.totalEncodeTime - lastOut.totalEncodeTime) / frames * 1000 });
+          var ms = (r.totalEncodeTime - lastOut.totalEncodeTime) / frames * 1000;
+          sendPeer({ enc: ms });
+          // At 30 frames a second each one has to be done in 33 ms. Two
+          // readings in a row over that and frames are piling up: step
+          // down to 720p for the rest of this connection.
+          slowReadings = ms > 30 ? slowReadings + 1 : 0;
+          if (!encodeSlow && slowReadings >= 2 && remote.sender) { encodeSlow = true; tuneSender(remote.sender); }
         }
         lastOut = r;
       });
