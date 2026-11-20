@@ -126,14 +126,23 @@
     display:flex;align-items:flex-end;justify-content:center;z-index:40;
   }
   .sheet-wrap[hidden]{display:none;}
+  /* Panels never grow taller than the screen: long ones scroll inside,
+     and the title row (with the close button) stays pinned at the top. */
   .sheet{
-    width:100%;max-width:480px;background:var(--panel);
-    border-radius:18px 18px 0 0;padding:18px 20px;
-    padding-bottom:calc(20px + env(safe-area-inset-bottom,0px));
+    width:100%;max-width:480px;background:var(--panel);box-sizing:border-box;
+    border-radius:18px 18px 0 0;padding:0 20px;
+    padding-bottom:calc(24px + env(safe-area-inset-bottom,0px));
     display:flex;flex-direction:column;gap:16px;
     border-top:1px solid var(--line);
+    max-height:calc(100% - 16px - env(safe-area-inset-top,0px));
+    overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y;
   }
-  .sheet-head{display:flex;align-items:center;justify-content:space-between;}
+  .sheet > *{flex-shrink:0;}
+  .sheet-head{
+    display:flex;align-items:center;justify-content:space-between;
+    position:sticky;top:0;z-index:2;background:var(--panel);
+    margin:0 -20px;padding:18px 20px 8px;
+  }
   .sheet-head h2{font-size:1.05rem;font-style:italic;}
   .row{display:flex;flex-direction:column;gap:6px;}
   .row-head{display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.04em;}
@@ -1020,7 +1029,11 @@
     applyTransform();
   }, { passive: false });
 
-  function openSheet(el){ el.hidden = false; }
+  function openSheet(el){
+    el.hidden = false;
+    var s = el.querySelector('.sheet');
+    if (s) s.scrollTop = 0; // always open at the top
+  }
   function closeSheet(el){ el.hidden = true; }
   els.adjustBtn.addEventListener('click', function(){ openSheet(els.adjustWrap); });
   els.closeAdjust.addEventListener('click', function(){ closeSheet(els.adjustWrap); });
