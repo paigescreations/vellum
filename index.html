@@ -230,11 +230,10 @@
     background:rgba(28,28,31,0.94);border:1px solid var(--line);border-radius:14px;padding:10px;
     font-size:0.78rem;color:var(--ink-soft);line-height:1.4;
   }
-  body.mode-viewer .pin-bar{bottom:56px;}
+  body.pinning .link-bar{display:none;}
   /* ...unless the canvas reaches down there and there's room up top. */
   body.fitbar-top .pin-bar{bottom:auto;top:10px;}
   body.fitbar-top .level{top:auto;bottom:12px;}
-  body.fitbar-top.mode-viewer .level{bottom:56px;}
   .pin-coach{display:flex;align-items:center;gap:10px;}
   .pin-coach-icon{
     width:34px;height:34px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
@@ -1247,7 +1246,7 @@
     var wasFitted = pin.on;
     var c = pin.on ? pinnedCorners() : rectCorners();
     var w = els.stage.clientWidth, h = els.stage.clientHeight, top = 24, pad = 24;
-    var bottom = remote.role === 'viewer' ? 220 : 170; // the fitting bar
+    var bottom = 170; // the fitting bar
     var xs = c.map(function(p){ return p.x; }), ys = c.map(function(p){ return p.y; });
     var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
     var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
@@ -1470,7 +1469,7 @@
     var q = pin.corners.map(toStage).map(function(p){ return { x: view.x + p.x * view.z, y: view.y + p.y * view.z }; });
     var sh = els.stage.clientHeight, need = fitEls.bar.offsetHeight + 20;
     var top = Math.min(q[0].y, q[1].y, q[2].y, q[3].y), bottom = Math.max(q[0].y, q[1].y, q[2].y, q[3].y);
-    var below = sh - (remote.role === 'viewer' ? 46 : 0) - bottom, above = top;
+    var below = sh - bottom, above = top;
     var atTop = document.body.classList.contains('fitbar-top'), want = atTop;
     if (!atTop && below < need && above >= need) want = true;
     else if (atTop && (below >= need + 30 || (above < need - 10 && below >= need))) want = false;
