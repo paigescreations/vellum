@@ -2395,7 +2395,7 @@
   function newPeer(){
     var pc = new RTCPeerConnection(ICE_CONFIG);
     var dc = pc.createDataChannel('vellum', { negotiated: true, id: 0 });
-    encodeSlow = false; slowReadings = 0; // each connection starts at full size
+    encodeSlow = false; slowReadings = 0; viewerSlow = 0; askedSmaller = false; // each connection starts fresh
     remote.pc = pc; remote.dc = dc;
     dc.binaryType = 'arraybuffer';
     dc.onmessage = onPeerMessage;
@@ -2431,6 +2431,8 @@
     var pc = remote.pc;
     if (msg.img) {
       onImageMessage(msg);
+    } else if (msg.smaller) {
+      if (remote.role === 'camera' && !encodeSlow && remote.sender) { encodeSlow = true; tuneSender(remote.sender); }
     } else if (typeof msg.enc === 'number') {
       encodeMs = msg.enc;
     } else if (msg.lvl !== undefined || msg.lvlTarget !== undefined) {
@@ -2519,10 +2521,15 @@
     if (!p.encodings || !p.encodings.length) return;
     var t = sender.track && sender.track.getSettings ? sender.track.getSettings() : {};
     var shortSide = Math.min(t.width || 0, t.height || 0);
-    var small = relayed || encodeSlow;
-    p.encodings[0].maxBitrate = relayed ? 1500000 : encodeSlow ? 4000000 : 8000000;
+    // 720p is the sweet spot for live tracing: sharp on a phone or tablet,
+    // and light enough that the viewer can unpack every frame before the
+    // next one arrives (full 1080p took a phone ~42 ms a frame, longer
+    // than the 33 ms between frames, so frames piled up into lag). If
+    // either end still can't keep up, drop to 540p.
+    var cap = encodeSlow ? 540 : 720;
+    p.encodings[0].maxBitrate = encodeSlow || relayed ? 1500000 : 3500000;
     p.encodings[0].maxFramerate = 30;
-    p.encodings[0].scaleResolutionDownBy = small && shortSide > 720 ? shortSide / 720 : 1;
+    p.encodings[0].scaleResolutionDownBy = shortSide > cap ? shortSide / cap : 1;
     var withPref = Object.assign({}, p, { degradationPreference: 'maintain-framerate' });
     sender.setParameters(withPref).catch(function(){
       sender.setParameters(p).catch(function(){});
@@ -2552,6 +2559,10 @@
       if (emitted <= 0 || decoded <= 0) return;
       var buffer = (inb.jitterBufferDelay - prev.jitterBufferDelay) / emitted * 1000;
       var decode = (inb.totalDecodeTime - prev.totalDecodeTime) / decoded * 1000;
+      // This device can't keep up (frames take longer to unpack than the
+      // gap between them, or are piling up): ask the tripod to send less.
+      viewerSlow = decode > 28 || buffer > 150 ? viewerSlow + 1 : 0;
+      if (viewerSlow >= 2 && !askedSmaller) { askedSmaller = true; sendPeer({ smaller: 1 }); }
       var network = (pair.currentRoundTripTime || 0) / 2 * 1000;
       var relay = types[pair.localCandidateId] === 'relay' || types[pair.remoteCandidateId] === 'relay';
       liveTiming = ' \u00b7 ' + (relay ? 'relay' : 'direct') + ' \u00b7 ' + Math.round(encodeMs + network + buffer + decode) + ' ms' +
@@ -2562,6 +2573,7 @@
     }).catch(function(){});
   }
   setInterval(viewerTiming, 2000);
+  var viewerSlow = 0, askedSmaller = false;
   var lastOut = null, slowReadings = 0;
   function tripodTiming(){
     var pc = remote.pc;
